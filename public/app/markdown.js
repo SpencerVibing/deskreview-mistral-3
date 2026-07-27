@@ -13,7 +13,7 @@ function renderMath(value = '') {
 export function inlineMarkdown(value = '') {
   const maths = [];
   let output = escapeHtml(value).replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => `@@DRMATH${maths.push(math) - 1}@@`);
-  output = output.replace(/!\[([^\]]*)\]\([^\n)]*\)/g, '$1').replace(/\[([^\]]+)\]\([^\n)]*\.html\)/gi, '$1');
+  output = output.replace(/!\[[^\]]*\]\([^\n)]*\)/g, '').replace(/\[([^\]]+)\]\([^\n)]*\.html\)/gi, '$1');
   output = output.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>').replace(/__([\s\S]+?)__/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>').replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
   return output.replace(/@@DRMATH(\d+)@@/g, (_, index) => `<span class="ocr-math">${renderMath(maths[Number(index)])}</span>`);
 }

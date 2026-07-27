@@ -209,6 +209,10 @@ for (const [id, file, authors, references] of [['chemrxiv', 'chemRxiv.pdf', '5',
   if (id === 'eartharxiv') {
     assert.equal(await storedPreprintPage.locator('.ocr-markdown-paragraph').evaluateAll((nodes) => nodes.some((node) => /^\s*51\s*(?:\n|$)\s*52\s*(?:\n|$)/.test(node.textContent || ''))), false, 'EarthArXiv standalone line-number runs are not rendered as headings');
   }
+  if (id === 'researchsquare') {
+    assert.equal(await storedPreprintPage.locator('.ocr-page[data-page="12"]').textContent().then((text) => !/img-\d+\.jpeg/i.test(text || '')), true, 'ResearchSquare OCR image placeholders are not rendered as manuscript text');
+    assert.ok(await storedPreprintPage.locator('.ocr-page[data-page="12"] .ocr-figure').count() > 0, 'ResearchSquare OCR figures remain rendered');
+  }
   const review = JSON.parse(fs.readFileSync(new URL(`../public/data/stored/${id}.json`, import.meta.url)));
   const groups = {
     authors: review.annotations['front-matter'].authors,
