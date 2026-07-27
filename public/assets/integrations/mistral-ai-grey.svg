@@ -1,0 +1,7 @@
+<svg role="img" aria-labelledby="mistral-ai-title" width="168" height="32" viewBox="0 0 168 32" xmlns="http://www.w3.org/2000/svg">
+  <title id="mistral-ai-title">Mistral AI</title>
+  <g fill="#5f5648">
+    <path d="M22.857 4.571v4.571h-4.572v4.572h-4.571V9.142H9.143V4.571H4.571v18.286H0v4.571h13.714v-4.571H9.143v-4.572h4.571v4.572h4.571v-4.572h4.572v4.572h-4.572v4.571H32v-4.571h-4.573V4.571z"/>
+    <text x="44" y="22.3" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18" font-weight="650" letter-spacing=".2">Mistral AI</text>
+  </g>
+</svg>

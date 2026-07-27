@@ -1,0 +1,21 @@
+{
+  "name": "deskreview-mistral-3",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "check": "node --check server/index.js && node --check core/document-annotation.js && node --check core/source-anchor.js && node --check public/app/runtime-log.js && node --check public/app.js",
+    "test:core": "node tests/source-anchor.test.mjs && node tests/runtime-log.test.mjs",
+    "test:ui": "node tests/reader-shell.test.mjs",
+    "test": "npm run test:core && npm run test:ui"
+  },
+  "dependencies": {
+    "bootstrap": "5.3.3",
+    "bootstrap-icons": "1.11.3",
+    "pdfjs-dist": "^6.1.200"
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
+  }
+}
