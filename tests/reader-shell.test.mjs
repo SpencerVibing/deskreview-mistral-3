@@ -137,6 +137,15 @@ await storedPage.locator('.toc-button').filter({ hasText: /^Introduction$/ }).cl
 await storedPage.waitForTimeout(250);
 assert.ok(await storedPage.locator('.html-scroll').evaluate((node) => node.scrollTop > 0));
 assert.equal(await storedPage.locator('.source-target-highlight').getByText('Introduction', { exact: true }).count(), 1);
+await storedPage.locator('#manuscriptSearchToggleButton').click();
+await storedPage.locator('#pdfSearchInput').fill('the');
+await storedPage.locator('#manuscriptSearchStatus').waitFor({ state: 'visible' });
+assert.match(await storedPage.locator('#manuscriptSearchStatus').textContent(), /^1 \/ \d+$/);
+assert.equal(await storedPage.locator('.manuscript-search-highlight').count(), 1);
+await storedPage.locator('#manuscriptSearchNext').click();
+assert.match(await storedPage.locator('#manuscriptSearchStatus').textContent(), /^2 \/ \d+$/);
+await storedPage.locator('#pdfMode').click();
+await storedPage.locator('.pdf-page-search-target').waitFor({ state: 'visible' });
 await storedPage.locator('#runtimeSummaryButton').click();
 await storedPage.locator('#runtimeSummaryModal.show').waitFor({ state: 'visible' });
 assert.equal(await storedPage.locator('#runtimeSummarySections').getByText('Stored OCR ready', { exact: true }).count(), 1);

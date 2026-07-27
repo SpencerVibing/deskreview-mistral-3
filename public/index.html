@@ -84,6 +84,9 @@
             <div class="input-group input-group-sm search-control border rounded bg-body">
               <span class="input-group-text bg-transparent border-0 text-secondary"><i class="bi bi-search"></i></span>
               <input id="pdfSearchInput" class="form-control border-0 bg-transparent shadow-none" type="search" placeholder="Search inside this manuscript..." aria-label="Search inside this manuscript">
+              <span id="manuscriptSearchStatus" class="input-group-text bg-transparent border-0 text-secondary small text-nowrap" aria-live="polite"></span>
+              <button id="manuscriptSearchPrevious" class="btn btn-light border-0 text-secondary" type="button" aria-label="Previous search match" title="Previous match" disabled><i class="bi bi-chevron-up" aria-hidden="true"></i></button>
+              <button id="manuscriptSearchNext" class="btn btn-light border-0 text-secondary" type="button" aria-label="Next search match" title="Next match" disabled><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
             </div>
           </div>
           <label class="btn btn-sm btn-light border text-secondary reader-icon-button mb-0" title="Upload PDF"><i class="bi bi-upload"></i><span class="visually-hidden">Upload PDF</span><input id="pdfInput" class="visually-hidden" type="file" accept="application/pdf"></label>

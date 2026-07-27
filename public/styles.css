@@ -83,8 +83,8 @@ html.force-ambient-motion .home-view { animation: home-ambient-float 18s ease-in
 .reader-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; }
 .reader-icon-button.active { color: var(--desk-accent) !important; background: #ebe7de !important; border-color: #d8d0c2 !important; }
 .manuscript-search-control { display: grid; grid-template-columns: 0fr; overflow: hidden; opacity: 0; transition: grid-template-columns .2s ease, opacity .2s ease; }
-.manuscript-search-control.is-open { grid-template-columns: 19rem; opacity: 1; }
-.search-control { width: 19rem; }
+.manuscript-search-control.is-open { grid-template-columns: 23rem; opacity: 1; }
+.search-control { width: 23rem; }
 .center-content { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; }
 .reader-tab-panel { width: 100%; min-height: 0; }
 .pdf-scroll, .html-scroll { height: 100%; padding: 0 .85rem .85rem; background: var(--desk-panel); }
@@ -93,6 +93,7 @@ html.force-ambient-motion .home-view { animation: home-ambient-float 18s ease-in
 #pdfCanvasHost { display: grid; gap: 1rem; justify-items: center; padding: .25rem 0; }
 .pdf-page { display: block; border-radius: .1rem; transition: outline-color .2s ease; }
 .pdf-page-target { outline: .18rem solid #c9b89c; outline-offset: .2rem; }
+.pdf-page-search-target { outline: .18rem solid #d4a75d; outline-offset: .2rem; }
 .pdf-page-canvas { display: block; max-width: 100%; height: auto; background: var(--desk-paper); box-shadow: 0 .5rem 1.5rem rgba(var(--desk-shadow), .12), 0 0 0 1px rgba(var(--desk-shadow), .06); }
 .empty-state { color: var(--desk-muted); padding: 4rem 1.5rem; }
 .empty-state i { font-size: 2rem; }
@@ -142,6 +143,7 @@ html.force-ambient-motion .home-view { animation: home-ambient-float 18s ease-in
 .detail-source-surface { padding: .85rem; border-radius: .45rem; background: #f3eee4; color: #494036; font-size: .84rem; line-height: 1.5; }
 .detail-jump:hover, .detail-jump:focus { background: #ece4d6; outline: none; }
 .source-target-highlight { padding: .08em .15em; background: #e9d6a8; color: inherit; }
+.manuscript-search-highlight { padding: .08em .15em; background: #f1d99a; color: inherit; }
 .ocr-page-source-target { outline: 2px solid rgba(137, 104, 63, .28); outline-offset: -2px; }
 .guideline-selector-modal-body { min-height: min(70vh, 660px); }
 .guideline-facets { width: 15rem; flex: 0 0 15rem; }
