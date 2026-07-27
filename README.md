@@ -1,12 +1,46 @@
 # DeskReview Mistral 3
 
-Clean rebuild workspace. `deskreview-mistral-2` remains the visual and interaction reference; no runtime code is copied into this project.
+DeskReview uses one Mistral OCR request per upload. That request returns both raw OCR pages and one source-grounded document annotation. The browser renders returned values and validates declared source anchors; it never reconstructs manuscript structure locally.
 
-## Starting Contract
+## Layout
 
-- Preserve the established DeskReview reader UI and interaction contracts when a UI is introduced.
-- Start with one Mistral OCR request as the primary source of truth.
-- Render only returned pages, blocks, tables, images, coordinates, and model-authored annotation data.
-- Never add local semantic reconstruction, resolver queues, reconciliation layers, or fallback guesses for manuscript structure.
-- Keep layers one-way: `public/` UI, `app/` browser coordination, `core/` pure transforms, `services/` adapters, `server/` HTTP/provider orchestration.
-- Add a cached fixture and browser test before each feature is added.
+- `public/`: static UI, browser coordination, and stored examples.
+- `core/`: pure source-anchor and annotation-contract validation.
+- `services/`: Mistral provider adapter.
+- `server/`: HTTP handling, abuse protection, and local development server.
+- `netlify/functions/`: Netlify adapter for the same analysis service.
+- `tests/`: core, provider-contract, and browser regression coverage.
+
+## Local Development
+
+Create `.env` with `MISTRAL_API_KEY`, then run:
+
+```sh
+npm start
+```
+
+The local reader runs at `http://127.0.0.1:8893`.
+
+## Production Security
+
+Set these host-managed environment variables. Never expose `MISTRAL_API_KEY` to the browser or commit it.
+
+```text
+NODE_ENV=production
+MISTRAL_API_KEY=...
+APP_ORIGIN=https://deskreview.ai
+OCR_RATE_LIMIT_MAX=5
+OCR_RATE_LIMIT_WINDOW_MS=60000
+OCR_MAX_CONCURRENT=2
+```
+
+`APP_ORIGIN` is required in production: OCR requests without that exact Origin header are rejected. The in-memory rate limit protects a single running server or warm serverless instance; use a shared rate-limit store before horizontally scaling production traffic.
+
+`netlify.toml` publishes `public/` and maps `/api/ocr/analyse` to the Netlify function. Netlify synchronous function limits still apply, so this deployment is appropriate only while the single Mistral request reliably finishes within the platform timeout. A long-running container is the production path for larger or slower manuscripts.
+
+## Verification
+
+```sh
+npm run check
+npm test
+```

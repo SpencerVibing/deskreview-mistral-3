@@ -3,6 +3,8 @@ import { initHome, refreshHome } from '/home.js';
 import { loadReview, saveReview } from '/review-store.js';
 import { validateDeclaredSource } from '/core/source-anchor.js';
 import { createRuntimeLog } from '/app/runtime-log.js';
+import { headingLabel, inlineMarkdown, markdownLabel, plain, renderMarkdown } from '/app/markdown.js';
+import { projectAnnotation } from '/app/annotation-projection.js';
 
 GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.mjs';
 
@@ -33,27 +35,6 @@ function renderRuntimeSummary() { const container = el('#runtimeSummarySections'
 function setMode(mode) { const pdf = mode === 'pdf'; pdfPane.classList.toggle('d-none', !pdf); htmlPane.classList.toggle('d-none', pdf); pdfMode.classList.toggle('active', pdf); htmlMode.classList.toggle('active', !pdf); }
 function setCount(kind, value = '—', loading = false) { const tile = el(`[data-count="${kind}"]`); if (!tile) return; tile.classList.toggle('is-loading', loading); tile.querySelector('strong').textContent = value; }
 function showProgress() { toc.replaceChildren(); const progress = document.createElement('div'); progress.className = 'empty-note px-2 py-3'; progress.textContent = 'Reading document structure...'; toc.append(progress); document.querySelectorAll('[data-count]').forEach((tile) => setCount(tile.dataset.count, 'Counting', true)); note.textContent = 'Reading the manuscript source.'; }
-function plain(value = '') { const doc = new DOMParser().parseFromString(String(value || ''), 'text/html'); return (doc.body.textContent || '').trim(); }
-function escapeHtml(value = '') { return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]); }
-function renderMath(value = '') { return String(value).replace(/\\(?:sigma)/g, 'σ').replace(/\\(?:psi)/g, 'ψ').replace(/\\(?:phi)/g, 'φ').replace(/\\(?:approx)/g, '≈').replace(/\\(?:sim)/g, '∼').replace(/\\(?:leq)/g, '≤').replace(/\\(?:geq)/g, '≥').replace(/\\(?:times)/g, '×').replace(/\\(?:cdot)/g, '·').replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '<span class="ocr-fraction"><sup>$1</sup><span>/</span><sub>$2</sub></span>').replace(/([A-Za-z0-9)})])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>').replace(/([A-Za-z0-9)})])_\{([^{}]+)\}/g, '$1<sub>$2</sub>'); }
-function inlineMarkdown(value = '') { const maths = []; let output = escapeHtml(value).replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => `@@DRMATH${maths.push(math) - 1}@@`); output = output.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>').replace(/__([\s\S]+?)__/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>').replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>'); return output.replace(/@@DRMATH(\d+)@@/g, (_, index) => `<span class="ocr-math">${renderMath(maths[Number(index)])}</span>`); }
-function markdownLabel(value = '') { return plain(String(value).replace(/\*\*([\s\S]+?)\*\*/g, '$1').replace(/__([\s\S]+?)__/g, '$1').replace(/\*([^*\n]+)\*/g, '$1').replace(/_([^_\n]+)_/g, '$1')); }
-function headingLabel(value = '') { return markdownLabel(plain(value).replace(/^#{1,6}\s*/, '')); }
-function stripSequentialLineNumbers(value = '') {
-  const lines = String(value).split(/\r?\n/);
-  const candidates = lines.map((line) => { const match = /^(\d{1,4})(?:\s+(.*))?$/.exec(line.trim()); return match ? { number: Number(match[1]), remainder: match[2] || '' } : null; });
-  const numbered = new Set();
-  let runStart = 0;
-  while (runStart < candidates.length) {
-    if (!candidates[runStart]) { runStart += 1; continue; }
-    let runEnd = runStart + 1;
-    while (candidates[runEnd] && candidates[runEnd].number === candidates[runEnd - 1].number + 1) runEnd += 1;
-    if (runEnd - runStart >= 4) for (let index = runStart; index < runEnd; index += 1) numbered.add(index);
-    runStart = runEnd;
-  }
-  return lines.map((line, index) => numbered.has(index) ? candidates[index].remainder : line).filter((line, index, all) => line.trim() || (index > 0 && all[index - 1].trim())).join('\n');
-}
-function renderMarkdown(value = '') { return stripSequentialLineNumbers(value).replace(/^!\[[^\]]*\]\([^\n)]*\)\s*$/gm, '').replace(/^\s*\[[^\]]+\.html\]\([^\n)]*\.html\)\s*$/gmi, '').split(/\n{2,}/).map((block) => block.trim().split(/\n+/).join(' ')).filter(Boolean).join('\n\n'); }
 function sourcePage(item = {}) { return Number(item?.source?.page_number || 0); }
 function resolveSource(item = {}) {
   const declared = validateDeclaredSource(state.raw?.pages || [], item);
@@ -100,7 +81,6 @@ function refreshOpenDetails(kinds = []) { if (kinds.includes(state.openDetailKin
 function showFrontMatterCounts(annotation = {}) { state.annotations['front-matter'] = annotation; state.annotationStatus['front-matter'] = 'ready'; const values = [['authors', annotation.authors?.length || 0], ['affiliations', annotation.affiliations?.length || 0], ['abstract', annotation.abstract?.word_count || 0], ['keywords', annotation.keywords?.length || 0]]; values.forEach(([kind, value]) => { setCount(kind, String(value)); recordCountReady(kind, value); recordSourceLinksReady(kind); }); refreshOpenDetails(values.map(([kind]) => kind)); }
 function showBodyCounts(annotation = {}) { state.annotations.body = annotation; state.annotationStatus.body = 'ready'; const articleWords = (annotation.sections || []).reduce((sum, section) => sum + Number(section.word_count || 0), 0); const displayItems = annotation.display_items || []; const tableCount = displayItems.filter((item) => item.kind === 'table').length; const figureCount = displayItems.filter((item) => item.kind === 'figure').length; setCount('article', String(articleWords)); setCount('tables', String(tableCount)); setCount('figures', String(figureCount)); recordCountReady('article', articleWords); recordCountReady('tables', tableCount); recordCountReady('figures', figureCount); ['article', 'tables', 'figures'].forEach(recordSourceLinksReady); refreshOpenDetails(['article', 'tables', 'figures']); }
 function showReferenceCounts(annotation = {}) { state.annotations.references = annotation; state.annotationStatus.references = 'ready'; const count = annotation.references?.length || 0; setCount('references', String(count)); recordCountReady('references', count); recordSourceLinksReady('references'); showHtml(state.raw?.pages || []); refreshOpenDetails(['references']); }
-function markPassUnavailable(name, kinds) { state.annotationStatus[name] = 'unavailable'; kinds.forEach((kind) => setCount(kind)); refreshOpenDetails(kinds); }
 function request(path, payload) { return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }).then(async (response) => ({ response, result: await response.json() })); }
 function closeDetails() { state.openDetailKind = ''; const panel = el('#detailsPanel'); panel.classList.remove('is-open'); panel.setAttribute('aria-hidden', 'true'); }
 function sourceItems(kind) { const front = state.annotations['front-matter'] || {}; const body = state.annotations.body || {}; const refs = state.annotations.references || {}; if (['authors', 'affiliations', 'keywords'].includes(kind)) return front[kind] || []; if (kind === 'abstract') return front.abstract?.text ? [front.abstract] : []; if (kind === 'article') return body.sections || []; if (kind === 'references') return refs.references || []; if (kind === 'tables' || kind === 'figures') return (body.display_items || []).filter((item) => item.kind === kind.slice(0, -1)); return []; }
@@ -152,13 +132,18 @@ async function upload(file) {
   loadPdf(pdfBytes.slice(0)).catch(() => { pdfEmpty.classList.remove('d-none'); pdfEmpty.querySelector('p').textContent = 'The PDF preview could not be rendered.'; });
   const base64 = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
   const payload = JSON.stringify({ fileName: file.name, base64 });
-  let rawResult; try { rawResult = await request('/api/ocr/raw', payload); } catch { recordRuntime('Raw OCR unavailable'); toc.textContent = 'Document structure is unavailable.'; return; }
-  if (!rawResult.response.ok) { recordRuntime('Raw OCR unavailable', rawResult.result.error || 'Request failed.'); toc.textContent = 'Document structure is unavailable.'; note.textContent = 'The OCR source could not be returned.'; return; }
-  recordRuntime('Raw OCR ready', `${rawResult.result.pages.length} pages in ${(Number(rawResult.result.elapsedMs || 0) / 1000).toFixed(1)} s.`);
-  showRawOcr(rawResult.result);
-  const annotations = { 'front-matter': null, body: null, references: null };
-  const jobs = [['front-matter', ['authors', 'affiliations', 'abstract', 'keywords'], showFrontMatterCounts], ['body', ['article'], showBodyCounts], ['references', ['references'], showReferenceCounts]].map(([name, kinds, apply]) => { state.annotationStatus[name] = 'pending'; return request(`/api/ocr/annotate/${name}`, payload).then(({ response, result }) => { if (response.ok) { annotations[name] = result.annotation; apply(result.annotation); recordRuntime(`${name.replace('-', ' ')} ready`, `${(Number(result.elapsedMs || 0) / 1000).toFixed(1)} s.`); fileName.textContent = `${result.fileName} · ${name.replace('-', ' ')} ready in ${(Number(result.elapsedMs || 0) / 1000).toFixed(1)} s`; } else { recordRuntime(`${name.replace('-', ' ')} unavailable`, result.error || 'Request failed.'); markPassUnavailable(name, kinds); } }).catch(() => { recordRuntime(`${name.replace('-', ' ')} unavailable`); markPassUnavailable(name, kinds); }); });
-  Promise.allSettled(jobs).then(async () => { try { const id = crypto.randomUUID(); await saveReview({ id, fileName: file.name, savedAt: new Date().toISOString(), pdfBlob, raw: rawResult.result, annotations }); recordRuntime('Review stored locally', 'Available from the home page without another OCR request.'); } catch { recordRuntime('Local review storage unavailable', 'This review remains open but could not be saved in this browser.'); } });
+  let analysis;
+  try { analysis = await request('/api/ocr/analyse', payload); } catch { recordRuntime('Document analysis unavailable'); toc.textContent = 'Document structure is unavailable.'; return; }
+  if (!analysis.response.ok) { recordRuntime('Document analysis unavailable', analysis.result.error || 'Request failed.'); toc.textContent = 'Document structure is unavailable.'; note.textContent = 'The OCR source could not be returned.'; return; }
+  const annotations = projectAnnotation(analysis.result.annotation);
+  recordRuntime('OCR and annotation ready', `${analysis.result.pages.length} pages in ${(Number(analysis.result.elapsedMs || 0) / 1000).toFixed(1)} s.`);
+  showRawOcr(analysis.result);
+  showFrontMatterCounts(annotations['front-matter']);
+  showBodyCounts(annotations.body);
+  showReferenceCounts(annotations.references);
+  recordRuntime('Source-linked counts ready', 'One model-authored document map returned.', 'annotation');
+  fileName.textContent = `${analysis.result.fileName} · source-linked results ready in ${(Number(analysis.result.elapsedMs || 0) / 1000).toFixed(1)} s`;
+  try { const id = crypto.randomUUID(); await saveReview({ id, fileName: file.name, savedAt: new Date().toISOString(), pdfBlob, raw: analysis.result, annotations }); recordRuntime('Review stored locally', 'Available from the home page without another OCR request.'); } catch { recordRuntime('Local review storage unavailable', 'This review remains open but could not be saved in this browser.'); }
 }
 async function openStoredReview(stored, pdfData, detail) {
   startRuntime(); recordRuntime('Stored review opened', 'Loading locally saved OCR and annotation results.');

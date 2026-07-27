@@ -13,10 +13,13 @@ const raw = {
 const annotation = {
   fileName: 'fixture.pdf', elapsedMs: 95000, pages: raw.pages,
   annotation: {
-    title: { text: 'Paper title', source: { page_number: 1, exact_quote: 'Paper title' } },
-    authors: [{ text: 'Ada Author', source: { page_number: 1, exact_quote: 'Ada Author' } }], affiliations: [], keywords: [{ text: 'Unconfirmed keyword', source: { page_number: 1, exact_quote: 'Not in OCR text' } }],
-    abstract: { text: 'Abstract', word_count: 1, source: { page_number: 1, exact_quote: 'Abstract' } },
-    sections: [{ heading: 'Methods', level: 1, text: 'Methods', word_count: 1, source: { page_number: 1, exact_quote: 'Methods' } }], references: [], display_items: [{ kind: 'table', label: 'Table 1', source: { page_number: 1, exact_quote: 'Table 1' } }]
+    front_matter: {
+      title: { text: 'Paper title', source: { page_number: 1, exact_quote: 'Paper title' } },
+      authors: [{ text: 'Ada Author', source: { page_number: 1, exact_quote: 'Ada Author' } }], affiliations: [], keywords: [{ text: 'Unconfirmed keyword', source: { page_number: 1, exact_quote: 'Not in OCR text' } }],
+      abstract: { text: 'Abstract', word_count: 1, source: { page_number: 1, exact_quote: 'Abstract' } }
+    },
+    body: { sections: [{ heading: 'Methods', level: 1, text: 'Methods', word_count: 1, source: { page_number: 1, exact_quote: 'Methods' } }], display_items: [{ kind: 'table', label: 'Table 1', source: { page_number: 1, exact_quote: 'Table 1' } }] },
+    references: { references: [] }
   }
 };
 function sourceExistsOnDeclaredPage(review, item) {
@@ -27,13 +30,9 @@ function sourceExistsOnDeclaredPage(review, item) {
   const values = [page.markdown || page.content || '', ...(page.tables || []).map((table) => table.content || ''), ...(page.blocks || []).map((block) => block.content || '')];
   return values.some((value) => String(value).includes(quote));
 }
-let releaseFrontMatter;
-const waitForFrontMatter = new Promise((resolve) => { releaseFrontMatter = resolve; });
 await page.route('**/api/ocr/**', async (route) => {
-  if (route.request().url().endsWith('/raw')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(raw) });
-  if (route.request().url().endsWith('/front-matter')) { await waitForFrontMatter; return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...annotation, annotation: { title: annotation.annotation.title, authors: annotation.annotation.authors, affiliations: [], keywords: annotation.annotation.keywords, abstract: annotation.annotation.abstract } }) }); }
-  if (route.request().url().endsWith('/body')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...annotation, annotation: { sections: annotation.annotation.sections, display_items: annotation.annotation.display_items } }) });
-  return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ ...annotation, annotation: { references: [] } }) });
+  assert.match(route.request().url(), /\/api\/ocr\/analyse$/);
+  return route.fulfill({ contentType: 'application/json', body: JSON.stringify(annotation) });
 });
 await page.goto(baseUrl);
 assert.equal(await page.locator('#homeView').evaluate((node) => !node.classList.contains('d-none')), true);
@@ -60,12 +59,12 @@ assert.equal(await page.locator('.toc-button').count(), 3);
 assert.equal(await page.locator('.toc-button').first().textContent(), 'Title');
 assert.equal(await page.locator('.toc-button').filter({ hasText: /^Title$/ }).count(), 1);
 assert.equal(await page.locator('[data-count="tables"] strong').textContent(), '1');
-assert.equal(await page.locator('[data-count="authors"]').evaluate((el) => el.classList.contains('is-loading')), true);
+assert.equal(await page.locator('[data-count="authors"]').evaluate((el) => el.classList.contains('is-loading')), false);
 assert.equal(await page.locator('#htmlMode.is-html-ready').count(), 1);
 assert.equal(await page.locator('.ocr-html strong').getByText('Paper title', { exact: true }).count(), 1);
 assert.equal(await page.locator('.ocr-html table').count(), 1);
 await page.locator('[data-count="authors"]').click();
-assert.equal(await page.locator('#detailsPanelBody').getByText('Still preparing these details', { exact: true }).count(), 1);
+assert.equal(await page.locator('#detailsPanelBody').getByText('Ada Author', { exact: true }).count(), 1);
 await page.locator('#detailsPanelClose').click();
 await page.locator('[data-count="tables"]').click();
 assert.equal(await page.locator('#detailsPanel').evaluate((node) => node.classList.contains('is-open')), true);
@@ -75,9 +74,10 @@ await page.locator('#tocToggleButton').click();
 assert.equal(await page.locator('#reader').evaluate((node) => node.classList.contains('toc-collapsed')), true);
 await page.locator('#tocToggleButton').click();
 const splitterBox = await page.locator('#tocSplitter').boundingBox();
-assert.ok(splitterBox);
+const readerBox = await page.locator('#reader').boundingBox();
+assert.ok(splitterBox && readerBox);
 await page.locator('#tocSplitter').dispatchEvent('pointerdown', { clientX: splitterBox.x + 2, clientY: splitterBox.y + 120 });
-await page.evaluate((coordinates) => window.dispatchEvent(new PointerEvent('pointermove', coordinates)), { clientX: splitterBox.x + 62, clientY: splitterBox.y + 120 });
+await page.evaluate((coordinates) => window.dispatchEvent(new PointerEvent('pointermove', { clientX: coordinates.readerLeft + 400, clientY: coordinates.y })), { readerLeft: readerBox.x, y: splitterBox.y + 120 });
 await page.evaluate(() => window.dispatchEvent(new PointerEvent('pointerup')));
 assert.ok(Number.parseFloat(await page.locator('#reader').evaluate((node) => node.style.getPropertyValue('--toc-width'))) > 288);
 await page.locator('button[aria-label="Checks options"]').click();
@@ -97,8 +97,6 @@ await page.getByRole('button', { name: 'Comments' }).click();
 assert.equal(await page.locator('#commentsPane').evaluate((node) => node.classList.contains('show')), true);
 assert.equal(await page.locator('#commentsAccordion .accordion-button').count(), 3);
 await page.getByRole('button', { name: 'Checks' }).click();
-releaseFrontMatter();
-await page.locator('[data-count="authors"]:not(.is-loading)').waitFor({ state: 'attached' });
 assert.equal(await page.locator('[data-count="authors"] strong').textContent(), '1');
 assert.equal(await page.locator('.toc-button').first().textContent(), 'Title');
 await page.locator('[data-count="authors"]').click();
