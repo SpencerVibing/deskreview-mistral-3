@@ -6,7 +6,7 @@
     <title>DeskReview</title>
     <link href="/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link href="/vendor/bootstrap-icons/bootstrap-icons.min.css" rel="stylesheet">
-    <link href="/styles.css?v=20260726-22" rel="stylesheet">
+    <link href="/styles.css?v=20260728-23" rel="stylesheet">
   </head>
   <body>
     <section id="homeView" class="home-view min-vh-100 d-flex flex-column">
@@ -16,14 +16,16 @@
         </nav>
       </header>
       <main class="container py-5 flex-grow-1 d-flex flex-column">
-        <section class="row align-items-start justify-content-between g-4 pb-5">
+        <section class="row align-items-start justify-content-between g-4 home-hero-section">
           <div class="col-12 col-lg-6 home-reveal">
+            <p class="home-hero-risk mb-4">Avoid preventable desk rejections</p>
             <h1 class="display-4 fw-semibold mb-3 home-headline">Is your paper <span>ready to submit?</span></h1>
             <p class="fs-5 lh-base text-secondary mb-4 home-lead" data-home-lead="DeskReview identifies the right reporting guides for your research manuscript, audits it for compliance, and delivers detailed, verifiable results in minutes." aria-label="DeskReview identifies the right reporting guides for your research manuscript, audits it for compliance, and delivers detailed, verifiable results in minutes."><span class="home-lead-typewriter" aria-hidden="true"></span></p>
-            <div class="d-flex gap-3 flex-wrap align-items-center">
-              <label class="btn btn-primary btn-lg home-upload-button mb-0"><i class="bi bi-upload me-2" aria-hidden="true"></i>Upload PDF<input id="homePdfInput" class="visually-hidden" type="file" accept="application/pdf"></label>
-              <a class="btn btn-outline-secondary btn-lg" href="#examplesSection">Learn more</a>
-            </div>
+            <div class="home-hero-action-stack">
+              <div class="d-flex gap-3 flex-wrap align-items-center">
+                <label class="btn btn-primary btn-lg home-upload-button mb-0"><i class="bi bi-upload me-2" aria-hidden="true"></i>Upload PDF<input id="homePdfInput" class="visually-hidden" type="file" accept="application/pdf"></label>
+                <button id="homeStoredReviewsButton" class="btn btn-outline-secondary btn-lg d-none" type="button"><i class="bi bi-archive me-2" aria-hidden="true"></i>Your deskreviews (<span data-home-stored-review-count>0</span>)</button>
+              </div>
             <div class="privacy-note small text-body-secondary mt-3">
               <span class="d-inline-flex align-items-center gap-2">
                 <i class="bi bi-shield-lock text-primary" aria-hidden="true"></i>
@@ -36,6 +38,7 @@
                 </p>
               </div>
             </div>
+            </div>
           </div>
           <div class="col-12 col-lg-5 text-center text-lg-end home-reveal home-reveal-delayed">
             <button type="button" class="home-preview position-relative p-0 border-0 bg-transparent text-start" aria-label="Play DeskReview demo" data-bs-toggle="modal" data-bs-target="#homeDemoModal">
@@ -45,16 +48,379 @@
             </button>
           </div>
         </section>
-        <section id="examplesSection" class="mt-4" aria-labelledby="examplesTitle">
-          <h2 id="examplesTitle" class="h6 small text-uppercase text-secondary fw-semibold mb-3 home-section-eyebrow">See examples</h2>
+        <section id="featureSection" class="home-feature-section py-5" aria-labelledby="featureSectionTitle">
+          <div class="row justify-content-center mb-4">
+            <div class="col-lg-10 col-xl-9 text-center home-scroll-reveal">
+              <div class="small text-uppercase text-secondary home-section-eyebrow mb-3">Key features</div>
+              <h2 id="featureSectionTitle" class="h1 fw-semibold mb-3">Every check you need, tied back to the manuscript.</h2>
+              <p class="text-secondary mb-0">DeskReview keeps checks compact on the surface and source-grounded underneath, so every finding can be opened, verified, and reused in feedback.</p>
+            </div>
+          </div>
+          <div class="vstack gap-5">
+            <article class="row g-4 align-items-center home-feature-story home-scroll-reveal">
+              <div class="col-12 col-lg-5">
+                <div class="home-feature-kicker">Integrity and completeness checks</div>
+                <h3 class="h2 fw-semibold mb-3">Counts, source-reference checks, and jump links.</h3>
+                <p class="text-secondary mb-0">DeskReview checks core manuscript elements such as authors, affiliations, abstract, article text, keywords, references, tables, and figures. Details open into source-linked panes so users can verify what was counted and where body-text references occur.</p>
+              </div>
+              <div class="col-12 col-lg-7">
+                <div id="featureIntegrityCarousel" class="carousel slide home-feature-carousel" data-bs-ride="false" aria-label="Integrity and completeness screenshots">
+                  <div class="carousel-inner">
+                    <div class="carousel-item active">
+                      <div class="home-shot-frame"><img src="/assets/screenshot-mistral.png" alt="DeskReview counts dashboard" class="home-shot-image"></div>
+                    </div>
+                    <div class="carousel-item">
+                      <div class="home-shot-frame home-shot-mock">
+                        <div class="home-shot-count-grid">
+                          <span><strong>10</strong> Authors</span><span><strong>6</strong> Affiliations</span><span><strong>250</strong> Abstract</span><span><strong>40</strong> References</span>
+                        </div>
+                        <div class="home-shot-detail"><i class="bi bi-link-45deg" aria-hidden="true"></i><span>Reference 1 · 3 occurrences in the body text</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <button class="carousel-control-prev" type="button" data-bs-target="#featureIntegrityCarousel" data-bs-slide="prev" aria-label="Previous screenshot"><span class="carousel-control-prev-icon" aria-hidden="true"></span></button>
+                  <button class="carousel-control-next" type="button" data-bs-target="#featureIntegrityCarousel" data-bs-slide="next" aria-label="Next screenshot"><span class="carousel-control-next-icon" aria-hidden="true"></span></button>
+                </div>
+              </div>
+            </article>
+            <article class="row g-4 align-items-center home-feature-story home-scroll-reveal">
+              <div class="col-12 col-lg-7 order-2 order-lg-1">
+                <div id="featureGuidelinesCarousel" class="carousel slide home-feature-carousel" data-bs-ride="false" aria-label="Reporting guideline screenshots">
+                  <div class="carousel-inner">
+                    <div class="carousel-item active">
+                      <div class="home-shot-frame"><img src="/assets/screenshot-mistral.png" alt="DeskReview reporting guidelines dashboard" class="home-shot-image home-shot-image-right"></div>
+                    </div>
+                    <div class="carousel-item">
+                      <div class="home-shot-frame home-shot-mock">
+                        <div class="home-shot-guideline-summary"><span class="home-shot-donut">46<br><small>items</small></span><div><strong>Essential guidelines</strong><p>Great · 46 items checked across 3 guidelines</p></div></div>
+                        <div class="home-shot-guide-row"><span>Abstract page</span><span class="progress"><span class="progress-bar bg-success-subtle" style="width:78%"></span><span class="progress-bar bg-warning-subtle" style="width:15%"></span></span></div>
+                        <div class="home-shot-quote"><i class="bi bi-quote" aria-hidden="true"></i><span>Quote-linked evidence opens directly in the manuscript.</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <button class="carousel-control-prev" type="button" data-bs-target="#featureGuidelinesCarousel" data-bs-slide="prev" aria-label="Previous screenshot"><span class="carousel-control-prev-icon" aria-hidden="true"></span></button>
+                  <button class="carousel-control-next" type="button" data-bs-target="#featureGuidelinesCarousel" data-bs-slide="next" aria-label="Next screenshot"><span class="carousel-control-next-icon" aria-hidden="true"></span></button>
+                </div>
+              </div>
+              <div class="col-12 col-lg-5 order-1 order-lg-2">
+                <div class="home-feature-kicker">Community reporting guidelines</div>
+                <h3 class="h2 fw-semibold mb-3">Guideline verification without hiding the evidence.</h3>
+                <p class="text-secondary mb-0">Essential and matched reporting guidelines are presented in a compact dashboard. Each item can expand into status, feedback, quotes, and jump links, so the result is easy to inspect instead of being a black-box score.</p>
+              </div>
+            </article>
+            <article class="row g-4 align-items-center home-feature-story home-scroll-reveal">
+              <div class="col-12 col-lg-5">
+                <div class="home-feature-kicker">Comments and reviewer guidance</div>
+                <h3 class="h2 fw-semibold mb-3">Annotate passages and keep review guidance close.</h3>
+                <p class="text-secondary mb-0">The Comments tab supports manuscript notes, annotated bookmarks, tags, reactions, and reviewer guidance forms. It helps reviewers move from source evidence to structured peer-review feedback.</p>
+              </div>
+              <div class="col-12 col-lg-7">
+                <div id="featureCommentsCarousel" class="carousel slide home-feature-carousel" data-bs-ride="false" aria-label="Comments screenshots">
+                  <div class="carousel-inner">
+                    <div class="carousel-item active">
+                      <div class="home-shot-frame home-shot-mock">
+                        <div class="home-shot-tabs"><span>Checks</span><span>Chat</span><strong>Comments</strong></div>
+                        <div class="home-shot-bookmark"><i class="bi bi-highlighter" aria-hidden="true"></i><div><strong>Annotated bookmark</strong><p>Selected manuscript quote with tags, comment, and reviewer reaction.</p></div></div>
+                        <div class="home-shot-note">Reviewer guidance · Create reusable question sets for a manuscript review.</div>
+                      </div>
+                    </div>
+                    <div class="carousel-item">
+                      <div class="home-shot-frame"><img src="/assets/screenshot-mistral.png" alt="DeskReview reader side panel" class="home-shot-image home-shot-image-right"></div>
+                    </div>
+                  </div>
+                  <button class="carousel-control-prev" type="button" data-bs-target="#featureCommentsCarousel" data-bs-slide="prev" aria-label="Previous screenshot"><span class="carousel-control-prev-icon" aria-hidden="true"></span></button>
+                  <button class="carousel-control-next" type="button" data-bs-target="#featureCommentsCarousel" data-bs-slide="next" aria-label="Next screenshot"><span class="carousel-control-next-icon" aria-hidden="true"></span></button>
+                </div>
+              </div>
+            </article>
+            <article class="row g-4 align-items-center home-feature-story home-scroll-reveal">
+              <div class="col-12 col-lg-7 order-2 order-lg-1">
+                <div id="featureReportCarousel" class="carousel slide home-feature-carousel" data-bs-ride="false" aria-label="Feedback report screenshots">
+                  <div class="carousel-inner">
+                    <div class="carousel-item active">
+                      <div class="home-shot-frame home-shot-mock">
+                        <div class="home-shot-report">
+                          <div class="home-shot-report-header">Feedback report</div>
+                          <div class="home-shot-report-line w-75"></div><div class="home-shot-report-line"></div><div class="home-shot-report-line w-50"></div>
+                          <div class="home-shot-report-card"><i class="bi bi-file-earmark-text" aria-hidden="true"></i><span>Constructive findings ready to export</span></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="carousel-item">
+                      <div class="home-shot-frame"><img src="/assets/screenshot-mistral.png" alt="DeskReview feedback workflow" class="home-shot-image"></div>
+                    </div>
+                  </div>
+                  <button class="carousel-control-prev" type="button" data-bs-target="#featureReportCarousel" data-bs-slide="prev" aria-label="Previous screenshot"><span class="carousel-control-prev-icon" aria-hidden="true"></span></button>
+                  <button class="carousel-control-next" type="button" data-bs-target="#featureReportCarousel" data-bs-slide="next" aria-label="Next screenshot"><span class="carousel-control-next-icon" aria-hidden="true"></span></button>
+                </div>
+              </div>
+              <div class="col-12 col-lg-5 order-1 order-lg-2">
+                <div class="home-feature-kicker">Feedback report generation</div>
+                <h3 class="h2 fw-semibold mb-3">Turn findings into structured feedback.</h3>
+                <p class="text-secondary mb-0">DeskReview can collect completed checks, comments, bookmarks, and reviewer guidance into a feedback report, making technical issues easier to share constructively with authors.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+        <section id="examplesSection" class="home-examples-section" aria-labelledby="examplesTitle">
+          <div class="home-scroll-reveal mb-4">
+            <div class="small text-uppercase text-secondary fw-semibold mb-3 home-section-eyebrow">Try DeskReview instantly</div>
+            <h2 id="examplesTitle" class="h1 fw-semibold mb-3">View these reviewed examples</h2>
+            <p class="text-secondary mb-0">Choose a precomputed preprint below to step into the reader, inspect the checks, and follow the source links without uploading a PDF first.</p>
+          </div>
           <div id="exampleManuscriptList" class="home-examples-scroll d-flex flex-nowrap"><div class="small text-secondary">Loading examples...</div></div>
         </section>
-        <section id="storedReviewsSection" class="mt-5 d-none" aria-labelledby="storedReviewsTitle">
-          <div class="d-flex align-items-center justify-content-between gap-3 mb-3"><h2 id="storedReviewsTitle" class="h6 small text-uppercase text-secondary fw-semibold mb-0 home-section-eyebrow">Stored desk reviews</h2><span class="small text-secondary">Private to this browser</span></div>
-          <div class="home-stored-table-wrap bg-white"><div class="table-responsive"><table class="table table-hover align-middle mb-0 home-stored-table"><thead><tr><th scope="col">Manuscript</th><th scope="col">Pages</th><th scope="col">Counts</th><th scope="col">Stored</th><th scope="col" class="text-end">Actions</th></tr></thead><tbody id="reviewLibraryBody"></tbody></table></div></div>
+        <section id="users" class="home-about-section home-landing-section py-5" aria-labelledby="usersTitle">
+          <div class="row justify-content-center">
+            <div class="col-lg-10 col-xl-9">
+              <h2 id="usersTitle" class="fw-semibold mb-2 home-scroll-reveal">Benefits of DeskReview.ai</h2>
+              <div class="row g-3">
+                <div class="col-lg-4 home-scroll-reveal">
+                  <a class="card h-100 border-0 shadow-none text-decoration-none audience-card" href="#featureSection" aria-label="Learn how DeskReview helps authors">
+                    <div class="card-body d-flex flex-column">
+                      <div class="d-flex align-items-center gap-3 mb-2">
+                        <img src="/assets/images/author.png" alt="Author" class="img-fluid rounded-circle border border-2 border-secondary flex-shrink-0 about-audience-avatar">
+                        <h3 class="h5 fw-semibold mb-0">For Authors</h3>
+                      </div>
+                      <p class="mb-0 text-secondary fs-5">Increased chances of a speedy acceptance at the journal of preference.</p>
+                      <div class="small text-primary fw-medium mt-auto pt-3 icon-link icon-link-hover d-inline-flex align-items-center">Pre-submission checks <i class="bi bi-arrow-right lh-1" aria-hidden="true"></i></div>
+                    </div>
+                  </a>
+                </div>
+                <div class="col-lg-4 home-scroll-reveal">
+                  <a class="card h-100 border-0 shadow-none text-decoration-none audience-card" href="#featureSection" aria-label="Learn how DeskReview helps editors">
+                    <div class="card-body d-flex flex-column">
+                      <div class="d-flex align-items-center gap-3 mb-2">
+                        <img src="/assets/images/editor.png" alt="Editor" class="img-fluid rounded-circle border border-2 border-secondary flex-shrink-0 about-audience-avatar">
+                        <h3 class="h5 fw-semibold mb-0">For Editors</h3>
+                      </div>
+                      <p class="mb-0 text-secondary fs-5">Saving time by ensuring reporting quality and completeness are in order.</p>
+                      <div class="small text-primary fw-medium mt-auto pt-3 icon-link icon-link-hover d-inline-flex align-items-center">Editorial screening <i class="bi bi-arrow-right lh-1" aria-hidden="true"></i></div>
+                    </div>
+                  </a>
+                </div>
+                <div class="col-lg-4 home-scroll-reveal">
+                  <a class="card h-100 border-0 shadow-none text-decoration-none audience-card" href="#featureSection" aria-label="Learn how DeskReview helps reviewers">
+                    <div class="card-body d-flex flex-column">
+                      <div class="d-flex align-items-center gap-3 mb-2">
+                        <img src="/assets/images/reviewer.png" alt="Reviewer" class="img-fluid rounded-circle border border-2 border-secondary flex-shrink-0 about-audience-avatar">
+                        <h3 class="h5 fw-semibold mb-0">For Reviewers</h3>
+                      </div>
+                      <p class="mb-0 text-secondary fs-5">Focus on the "big idea" instead of technical details.</p>
+                      <div class="small text-primary fw-medium mt-auto pt-3 icon-link icon-link-hover d-inline-flex align-items-center">Review workspace <i class="bi bi-arrow-right lh-1" aria-hidden="true"></i></div>
+                    </div>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
-        <section class="home-integrations mt-auto pt-5" aria-label="Powered by integrations">
-          <div class="home-integrations-scroll d-flex align-items-center flex-nowrap" role="list">
+        <section id="usp" class="home-about-section home-landing-section py-5" aria-labelledby="uspTitle">
+          <div class="row justify-content-center">
+            <div class="col-lg-10 col-xl-9">
+              <div class="home-scroll-reveal">
+                <div class="pill mb-3 section-eyebrow">Why DeskReview.ai</div>
+                <h2 id="uspTitle" class="fw-semibold mb-2 usp-title">A scientific instrument, not a conversational gamble</h2>
+                <p class="lead text-secondary mb-4">While general-purpose AI can offer feedback, DeskReview.ai is built as a specialized instrument for manuscript validation, offering four critical advantages over a standard chat interface:</p>
+                <div class="slab p-4 d-flex flex-column flex-lg-row gap-4 usp-comparison">
+                  <div class="table-responsive usp-comparison-table-wrap">
+                    <table class="table table-borderless table-hover align-middle mb-0 text-start usp-comparison-table">
+                      <thead>
+                        <tr class="text-uppercase small text-secondary">
+                          <th scope="col" class="fw-semibold"></th>
+                          <th scope="col" class="fw-semibold usp-icon-col usp-icon-col-danger">Chatbot</th>
+                          <th scope="col" class="fw-semibold usp-icon-col usp-icon-col-success">DeskReview</th>
+                        </tr>
+                      </thead>
+                      <tbody id="uspComparisonBody">
+                        <tr class="usp-row is-active" data-usp-key="repro" data-usp-text="LLMs are non-deterministic, often producing different results for the same prompt. DeskReview.ai ensures consistent LLM responses by verifying manuscripts against narrow, fact-focused guideline items.">
+                          <td><i class="bi bi-chevron-right me-2 small"></i>Reproducible</td>
+                          <td class="usp-icon-col usp-icon-col-danger"><i class="bi bi-x-lg text-danger fw-bold"></i></td>
+                          <td class="usp-icon-col usp-icon-col-success"><i class="bi bi-check-lg text-success fw-bold"></i></td>
+                        </tr>
+                        <tr class="usp-row" data-usp-key="facts" data-usp-text="The system identifies the presence or absence of verifiable facts required by reporting standards. It avoids the subjective “opinions”, leaving qualitative interpretation to the human expert.">
+                          <td><i class="bi bi-chevron-right me-2 small"></i>Facts over Opinion</td>
+                          <td class="usp-icon-col usp-icon-col-danger"><i class="bi bi-x-lg text-danger fw-bold"></i></td>
+                          <td class="usp-icon-col usp-icon-col-success"><i class="bi bi-check-lg text-success fw-bold"></i></td>
+                        </tr>
+                        <tr class="usp-row" data-usp-key="glance" data-usp-text="Instead of a wall-of-text, you get an interactive dashboard that shows key results at a glance. Easily verify results with findings linked directly to the relevant passage in the manuscript.">
+                          <td><i class="bi bi-chevron-right me-2 small"></i>At-a-glance verification</td>
+                          <td class="usp-icon-col usp-icon-col-danger"><i class="bi bi-x-lg text-danger fw-bold"></i></td>
+                          <td class="usp-icon-col usp-icon-col-success"><i class="bi bi-check-lg text-success fw-bold"></i></td>
+                        </tr>
+                        <tr class="usp-row" data-usp-key="guidelines" data-usp-text="DeskReview.ai utilizes authoritative guidelines published and cited by the research community. Your manuscript is verified against reporting standards recognized by your field.">
+                          <td><i class="bi bi-chevron-right me-2 small"></i>Established guidelines</td>
+                          <td class="usp-icon-col usp-icon-col-danger"><i class="bi bi-x-lg text-danger fw-bold"></i></td>
+                          <td class="usp-icon-col usp-icon-col-success"><i class="bi bi-check-lg text-success fw-bold"></i></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div class="usp-comparison-detail" id="uspDetailPanel">
+                    <div class="usp-detail-inner">LLMs are non-deterministic, often producing different results for the same prompt. DeskReview.ai ensures consistent LLM responses by verifying manuscripts against narrow, fact-focused guideline items.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section id="pricing" class="home-pricing-section home-landing-section" aria-labelledby="pricingTitle">
+          <div class="row justify-content-center">
+            <div class="col-lg-10 col-xl-9">
+              <div class="text-center mb-4 home-scroll-reveal">
+                <div class="small text-uppercase text-secondary home-section-eyebrow mb-3">Pricing</div>
+                <h2 id="pricingTitle" class="fw-semibold mb-3">Choose the plan that fits how often you review manuscripts.</h2>
+                <p class="text-secondary mb-0">Start with a quick readiness check, unlock a full manuscript review when needed, or contact us for managed workflows and custom guidance.</p>
+              </div>
+              <div class="row g-3 mb-4 pricing-plan-cards">
+                <div class="col-md-4 home-scroll-reveal">
+                  <div class="card h-100 pricing-plan-card">
+                    <div class="card-body p-4 d-flex flex-column">
+                      <div class="small text-uppercase text-secondary fw-semibold home-section-eyebrow mb-2">Free</div>
+                      <div class="h3 fw-semibold mb-1">€0</div>
+                      <p class="small text-secondary mb-3">A quick first pass with essential reporting guidance.</p>
+                      <ul class="list-unstyled small text-secondary mb-4">
+                        <li class="d-flex gap-2 mb-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>Essential guides</span></li>
+                        <li class="d-flex gap-2 mb-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>Basic manuscript readiness signal</span></li>
+                        <li class="d-flex gap-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>No account required</span></li>
+                      </ul>
+                      <a class="btn btn-outline-primary w-100 mt-auto" href="#homeView">Start now</a>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4 home-scroll-reveal">
+                  <div class="card h-100 pricing-plan-card pricing-plan-card-featured">
+                    <div class="card-body p-4 d-flex flex-column">
+                      <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                        <div class="small text-uppercase text-primary fw-semibold home-section-eyebrow">One-off</div>
+                        <span class="badge rounded-pill text-primary bg-primary-subtle border border-primary-subtle">Recommended</span>
+                      </div>
+                      <div class="h3 fw-semibold mb-1">€3,99</div>
+                      <p class="small text-secondary mb-3">Unlock the full review for one manuscript.</p>
+                      <ul class="list-unstyled small text-secondary mb-4">
+                        <li class="d-flex gap-2 mb-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>Matched guide results</span></li>
+                        <li class="d-flex gap-2 mb-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>Reference integrity checks</span></li>
+                        <li class="d-flex gap-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>Downloadable report</span></li>
+                      </ul>
+                      <a class="btn btn-primary w-100 mt-auto" href="#pricingFeatureComparison">Compare features</a>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4 home-scroll-reveal">
+                  <div class="card h-100 pricing-plan-card">
+                    <div class="card-body p-4 d-flex flex-column">
+                      <div class="small text-uppercase text-secondary fw-semibold home-section-eyebrow mb-2">Custom</div>
+                      <div class="h3 fw-semibold mb-1">Custom</div>
+                      <p class="small text-secondary mb-3">For managed workflows, teams, and custom guidance.</p>
+                      <ul class="list-unstyled small text-secondary mb-4">
+                        <li class="d-flex gap-2 mb-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>Custom guides</span></li>
+                        <li class="d-flex gap-2 mb-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>Chat-with-PDF workflows</span></li>
+                        <li class="d-flex gap-2"><i class="bi bi-check2 text-primary" aria-hidden="true"></i><span>Bulk upload support</span></li>
+                      </ul>
+                      <a class="btn btn-outline-primary w-100 mt-auto" href="mailto:contact@deskreview.ai">Contact us</a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="accordion pricing-feature-accordion home-scroll-reveal" id="pricingFeatureComparison">
+                <div class="accordion-item">
+                  <h3 class="accordion-header" id="pricingCoreHeading">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#pricingCoreCollapse" aria-expanded="false" aria-controls="pricingCoreCollapse">
+                      <span class="fw-semibold">Manuscript and guideline checks</span>
+                      <span class="badge rounded-pill text-bg-light border ms-2">8 plugins</span>
+                    </button>
+                  </h3>
+                  <div id="pricingCoreCollapse" class="accordion-collapse collapse" aria-labelledby="pricingCoreHeading" data-bs-parent="#pricingFeatureComparison">
+                    <div class="accordion-body p-0">
+                      <div class="table-responsive pricing-feature-table-wrap">
+                        <table class="table align-middle pricing-feature-table mb-0">
+                          <thead><tr><th scope="col">Feature</th><th scope="col" class="text-center">Free</th><th scope="col" class="text-center">One-off</th><th scope="col" class="text-center">Custom</th></tr></thead>
+                          <tbody>
+                            <tr><th scope="row" class="fw-normal">Essential guidelines</th><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Matched reporting guidelines</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Open Science guidelines</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Tables &amp; figures citation checks</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Journal author guidelines</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><span class="badge text-bg-light border">Route</span></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Pinned author guidelines</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><span class="badge text-bg-light border">Route</span></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Pinned guidelines</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Custom guidelines</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="accordion-item">
+                  <h3 class="accordion-header" id="pricingReferencesHeading">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#pricingReferencesCollapse" aria-expanded="false" aria-controls="pricingReferencesCollapse">
+                      <span class="fw-semibold">References, profiles, and similar articles</span>
+                      <span class="badge rounded-pill text-bg-light border ms-2">10 checks</span>
+                    </button>
+                  </h3>
+                  <div id="pricingReferencesCollapse" class="accordion-collapse collapse" aria-labelledby="pricingReferencesHeading" data-bs-parent="#pricingFeatureComparison">
+                    <div class="accordion-body p-0">
+                      <div class="table-responsive pricing-feature-table-wrap">
+                        <table class="table align-middle pricing-feature-table mb-0">
+                          <thead><tr><th scope="col">Feature</th><th scope="col" class="text-center">Free</th><th scope="col" class="text-center">One-off</th><th scope="col" class="text-center">Custom</th></tr></thead>
+                          <tbody>
+                            <tr><th scope="row" class="fw-normal">Reference resolution</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Citation usage issues</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Reference metadata issues</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Retractions</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Citation patterns</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Self-citations</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">OpenAlex author profiles</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Semantic Scholar author profiles</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Similar abstracts from PubMed</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Similar abstracts from OpenAlex and Semantic Scholar</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="accordion-item">
+                  <h3 class="accordion-header" id="pricingReviewerHeading">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#pricingReviewerCollapse" aria-expanded="false" aria-controls="pricingReviewerCollapse">
+                      <span class="fw-semibold">Reviewer workspace and reports</span>
+                      <span class="badge rounded-pill text-bg-light border ms-2">6 tools</span>
+                    </button>
+                  </h3>
+                  <div id="pricingReviewerCollapse" class="accordion-collapse collapse" aria-labelledby="pricingReviewerHeading" data-bs-parent="#pricingFeatureComparison">
+                    <div class="accordion-body p-0">
+                      <div class="table-responsive pricing-feature-table-wrap">
+                        <table class="table align-middle pricing-feature-table mb-0">
+                          <thead><tr><th scope="col">Feature</th><th scope="col" class="text-center">Free</th><th scope="col" class="text-center">One-off</th><th scope="col" class="text-center">Custom</th></tr></thead>
+                          <tbody>
+                            <tr><th scope="row" class="fw-normal">Download feedback report</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Local browser review history</th><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">PDF table of contents</th><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Chat with PDF</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Comments, notes, and PDF bookmarks</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                            <tr><th scope="row" class="fw-normal">Comments feedback report</th><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-x-lg pricing-feature-x" aria-hidden="true"></i></td><td class="text-center"><i class="bi bi-check-lg pricing-feature-check" aria-hidden="true"></i></td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="alert alert-light border pricing-privacy-note mt-4 small home-scroll-reveal">
+                <p class="mb-2"><strong>Mistral processing.</strong> DeskReview uses Mistral to process your manuscript only for the review you request. Our Mistral API account is configured to opt out of model training, so uploaded content is not used to train Mistral models.</p>
+                <p class="mb-0"><strong>Privacy.</strong> Your review history is stored locally in your browser on your own device, not in a DeskReview cloud account. Always get the author&apos;s consent before using AI services to review unpublished or sensitive manuscripts.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section id="integrationsSection" class="home-integrations home-landing-section" aria-labelledby="integrationsTitle">
+          <div class="row justify-content-center text-center mb-4">
+            <div class="col-lg-10 col-xl-8 home-scroll-reveal">
+              <div class="small text-uppercase text-secondary home-section-eyebrow mb-3">Powered by trusted infrastructure</div>
+              <h2 id="integrationsTitle" class="fw-semibold mb-3">European AI, connected to scholarly sources.</h2>
+              <p class="home-integration-copy text-secondary mb-0 mx-auto">DeskReview uses Mistral, a European AI provider, for manuscript understanding and connects results to trusted research infrastructure for source-grounded checks, profiles, citations, and related literature.</p>
+            </div>
+          </div>
+          <div class="home-integrations-scroll d-flex align-items-center flex-nowrap home-scroll-reveal" role="list" aria-label="DeskReview integrations">
             <div class="integration-logo-item flex-shrink-0" role="listitem"><img src="/assets/integrations/crossref-transparent.png" class="integration-logo" alt="Crossref"></div>
             <div class="integration-logo-item flex-shrink-0" role="listitem"><img src="/assets/integrations/openalex-transparent.png" class="integration-logo integration-logo-openalex" alt="OpenAlex"></div>
             <div class="integration-logo-item flex-shrink-0" role="listitem"><img src="/assets/integrations/ORCID_full_logo.png" class="integration-logo integration-logo-orcid" alt="ORCID"></div>
@@ -64,7 +430,7 @@
           </div>
         </section>
       </main>
-      <footer class="home-footer border-top py-4"><div class="container d-flex flex-wrap justify-content-center align-items-center gap-3 small"><a class="link-secondary text-decoration-none" href="/about.html">About</a><a class="link-secondary text-decoration-none" href="/team.html">Team</a><a class="link-secondary text-decoration-none" href="/download.html">Download</a><a class="link-secondary text-decoration-none" href="/privacy.html">Privacy</a><a class="link-secondary text-decoration-none" href="/terms.html">Terms</a><a class="link-secondary text-decoration-none" href="/assets/copyright/copyright.txt">Copyright</a><a class="home-contact-link" href="mailto:contact@deskreview.ai"><i class="bi bi-envelope" aria-hidden="true"></i>contact@deskreview.ai</a></div></footer>
+      <footer class="home-footer border-top py-4"><div class="container d-flex flex-wrap justify-content-center align-items-center gap-3 small"><a class="link-secondary text-decoration-none" href="#featureSection">About</a><a class="link-secondary text-decoration-none" href="/team.html">Team</a><a class="link-secondary text-decoration-none" href="/download.html">Download</a><a class="link-secondary text-decoration-none" href="/privacy.html">Privacy</a><a class="link-secondary text-decoration-none" href="/terms.html">Terms</a><a class="link-secondary text-decoration-none" href="/assets/copyright/copyright.txt">Copyright</a><a class="home-contact-link" href="mailto:contact@deskreview.ai"><i class="bi bi-envelope" aria-hidden="true"></i>contact@deskreview.ai</a></div></footer>
     </section>
     <main id="reader" class="studio-reader d-none" aria-label="DeskReview manuscript reader">
       <aside class="studio-pane studio-toc-pane" aria-label="Table of contents">
@@ -73,7 +439,7 @@
           <a class="brand-wordmark text-decoration-none" href="/" aria-label="DeskReview home"><span>Desk</span><strong>Review</strong></a>
         </div>
         <div class="toc-header px-3 mt-2"><span class="small text-secondary">Table of contents</span></div>
-        <nav id="tocList" class="toc-scroll p-2" aria-label="Table of contents"><div class="empty-note px-2 py-3">Section headings will appear here.</div></nav>
+        <nav id="tocList" class="toc-scroll p-2" aria-label="Table of contents"><div class="toc-pending d-flex align-items-center gap-2 px-2 py-2 small text-secondary"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Preparing the table of contents...</span></div></nav>
       </aside>
       <div id="tocSplitter" class="studio-splitter" role="separator" aria-label="Resize table of contents" aria-orientation="vertical" tabindex="0"></div>
 
@@ -89,14 +455,17 @@
               <button id="manuscriptSearchNext" class="btn btn-light border-0 text-secondary" type="button" aria-label="Next search match" title="Next match" disabled><i class="bi bi-chevron-down" aria-hidden="true"></i></button>
             </div>
           </div>
+          <button id="storedReviewsButton" class="btn btn-sm btn-light border text-secondary reader-icon-button" type="button" title="Stored desk reviews" aria-label="Stored desk reviews" data-bs-toggle="modal" data-bs-target="#storedReviewsModal"><i class="bi bi-archive"></i></button>
           <label class="btn btn-sm btn-light border text-secondary reader-icon-button mb-0" title="Upload PDF"><i class="bi bi-upload"></i><span class="visually-hidden">Upload PDF</span><input id="pdfInput" class="visually-hidden" type="file" accept="application/pdf"></label>
-          <button id="htmlMode" class="btn btn-sm btn-light border text-secondary reader-icon-button" type="button" title="Show OCR HTML" aria-label="Show OCR HTML"><i class="bi bi-code-slash"></i></button>
-          <button id="pdfMode" class="btn btn-sm btn-light border text-secondary reader-icon-button active" type="button" title="Show PDF" aria-label="Show PDF"><i class="bi bi-file-earmark-pdf"></i></button>
           <button id="manuscriptSearchToggleButton" class="btn btn-sm btn-light border text-secondary reader-icon-button" type="button" title="Search inside this manuscript" aria-label="Search inside this manuscript" aria-expanded="false"><i class="bi bi-search"></i></button>
+          <div class="btn-group btn-group-sm reader-view-toggle" role="group" aria-label="Switch manuscript view">
+            <button id="pdfMode" class="btn btn-light border text-secondary reader-icon-button active" type="button" title="Show PDF" aria-label="Show PDF"><i class="bi bi-file-earmark-pdf"></i></button>
+            <button id="htmlMode" class="btn btn-light border text-secondary reader-icon-button" type="button" title="Show OCR HTML" aria-label="Show OCR HTML"><i class="bi bi-code-slash"></i></button>
+          </div>
         </header>
         <div class="center-content">
           <section id="pdfPane" class="reader-tab-panel active" aria-label="PDF manuscript view">
-            <div class="pdf-scroll"><div id="pdfDocument" class="pdf-document"><div id="pdfEmpty" class="empty-state text-center"><i class="bi bi-file-earmark-pdf d-block mb-3"></i><p class="mb-0">Upload a manuscript PDF to render the source pages.</p></div><div id="pdfCanvasHost" class="d-none" aria-label="Rendered manuscript PDF"></div></div></div>
+            <div class="pdf-scroll"><div id="pdfDocument" class="pdf-document"><div id="pdfEmpty" class="empty-state text-center"><i class="bi bi-file-earmark-pdf d-block mb-3"></i><p class="mb-3">Upload a manuscript PDF to render the source pages.</p><button id="pdfEmptyUploadButton" class="btn btn-primary btn-sm" type="button"><i class="bi bi-upload me-1" aria-hidden="true"></i>Upload PDF</button></div><div id="pdfCanvasHost" class="d-none" aria-label="Rendered manuscript PDF"></div></div></div>
           </section>
           <section id="htmlPane" class="reader-tab-panel d-none" aria-label="OCR HTML manuscript view"><div class="html-scroll"><article class="ocr-html"><div class="empty-state text-center"><i class="bi bi-file-richtext d-block mb-3"></i><p class="mb-0">The rendered manuscript will appear here.</p></div></article></div></section>
         </div>
@@ -106,7 +475,7 @@
       <aside class="studio-pane studio-counts-pane" aria-label="DeskReview checks">
         <div class="counts-toggle-row d-flex align-items-center justify-content-end px-3 pt-3"><button id="countsToggleButton" class="btn btn-link text-body p-0 counts-toggle-button" type="button" aria-label="Close side panel" aria-expanded="true"><i class="bi bi-x-lg"></i></button></div>
         <div id="readerSideShell" class="reader-side-shell d-flex flex-column flex-grow-1 min-h-0">
-          <ul class="nav nav-underline nav-fill px-3 pt-2 mb-3 border-bottom flex-nowrap side-tabs" role="tablist">
+          <ul class="nav nav-fill mx-3 mt-2 mb-3 flex-nowrap side-tabs" role="tablist">
             <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#checksPane" type="button"><i class="bi bi-clipboard-check d-block"></i><span>Checks</span></button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#chatPane" type="button"><i class="bi bi-chat-left-text d-block"></i><span>Chat</span></button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#commentsPane" type="button"><i class="bi bi-pencil-square d-block"></i><span>Comments</span></button></li>
@@ -119,7 +488,7 @@
               </div></div></section>
               <section class="card border-0 shadow-sm rounded-3 mb-3 side-group-card"><div class="card-header bg-body px-3 py-2"><button class="btn btn-link text-decoration-none text-start p-0 w-100 d-flex align-items-center justify-content-between" type="button" data-bs-toggle="collapse" data-bs-target="#essentialPanel" aria-expanded="true"><span class="guide-card-kicker">Essential guidelines</span><i class="bi bi-chevron-down"></i></button></div><div id="essentialPanel" class="collapse show"><div class="card-body p-3"><button class="guide-list-row" type="button">Abstract page <span class="progress guide-progress-mini"><span class="progress-bar bg-success-subtle" style="width:75%"></span></span></button><button class="guide-list-row" type="button">IMRaD <span class="progress guide-progress-mini"><span class="progress-bar bg-success-subtle" style="width:70%"></span></span></button><button class="guide-list-row" type="button">Declarations <span class="progress guide-progress-mini"><span class="progress-bar bg-warning-subtle" style="width:42%"></span></span></button></div></div></section>
               <section class="card border-0 shadow-sm rounded-3 side-group-card"><div class="card-header bg-body px-3 py-2"><button class="btn btn-link text-decoration-none text-start p-0 w-100 d-flex align-items-center justify-content-between collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#matchedPanel"><span class="guide-card-kicker">Matched guidelines</span><i class="bi bi-chevron-down"></i></button></div><div id="matchedPanel" class="collapse"><div class="card-body p-3"><div class="small text-secondary">Matched reporting guidelines will appear after analysis.</div></div></div></section>
-              <div class="px-1 pt-3 d-flex align-items-center justify-content-between gap-2"><div class="counts-note">Counts will populate from source-grounded Mistral annotation.</div><button id="runtimeSummaryButton" class="btn btn-sm btn-link text-secondary p-1" type="button" aria-label="Runtime summary" data-bs-toggle="modal" data-bs-target="#runtimeSummaryModal" title="Runtime summary"><i class="bi bi-clock-history"></i></button></div>
+              <div class="px-1 pt-3 d-flex align-items-center justify-content-between gap-2"><div class="counts-note">Counts will populate from source-grounded Mistral annotation.</div><button id="annotationContractButton" class="btn btn-sm btn-link text-secondary p-1 d-none" type="button" data-bs-toggle="modal" data-bs-target="#annotationContractModal" aria-label="View developer diagnostics" title="View developer diagnostics"><i class="bi bi-braces" aria-hidden="true"></i></button></div>
             </div></section>
             <section id="chatPane" class="tab-pane fade h-100" role="tabpanel"><div class="d-flex flex-column h-100"><div class="flex-grow-1 overflow-auto p-3"><div class="empty-note">Ask questions about the manuscript once annotation is available.</div></div><form class="border-top bg-body p-3"><label class="form-label small text-secondary" for="chatInput">Ask about this manuscript</label><div class="d-flex gap-2"><textarea id="chatInput" class="form-control" rows="3" placeholder="Ask a question"></textarea><button class="btn btn-primary align-self-end" type="button" aria-label="Send chat message"><i class="bi bi-send"></i></button></div></form></div></section>
             <section id="commentsPane" class="tab-pane fade h-100" role="tabpanel"><div class="overflow-auto p-3 h-100"><div class="accordion accordion-flush" id="commentsAccordion"><div class="accordion-item bg-transparent"><h2 class="accordion-header"><button class="accordion-button collapsed bg-transparent px-0" type="button" data-bs-toggle="collapse" data-bs-target="#notepadCollapse">Notepad</button></h2><div id="notepadCollapse" class="accordion-collapse collapse" data-bs-parent="#commentsAccordion"><div class="accordion-body px-0 pt-3"><textarea class="form-control" rows="8" placeholder="Jot down manuscript-wide notes"></textarea><div class="small text-secondary mt-2">Auto-saves</div></div></div></div><div class="accordion-item bg-transparent"><h2 class="accordion-header"><button class="accordion-button collapsed bg-transparent px-0" type="button" data-bs-toggle="collapse" data-bs-target="#bookmarksCollapse">Annotated bookmarks</button></h2><div id="bookmarksCollapse" class="accordion-collapse collapse" data-bs-parent="#commentsAccordion"><div class="accordion-body px-0 pt-3"><div class="empty-note"><i class="bi bi-highlighter me-2"></i>Select text to add an annotated bookmark.</div></div></div></div><div class="accordion-item bg-transparent border-bottom-0"><h2 class="accordion-header"><button class="accordion-button collapsed bg-transparent px-0" type="button" data-bs-toggle="collapse" data-bs-target="#reviewerCollapse">Reviewer guidance</button></h2><div id="reviewerCollapse" class="accordion-collapse collapse" data-bs-parent="#commentsAccordion"><div class="accordion-body px-0 pt-3"><div class="empty-note text-center"><i class="bi bi-clipboard2-plus d-block fs-4 mb-2"></i><div class="fw-semibold mb-2">No reviewer forms yet</div><button class="btn btn-outline-primary btn-sm" type="button" data-bs-toggle="modal" data-bs-target="#reviewerFormModal">Create reviewer form</button></div></div></div></div></div></div></section>
@@ -129,11 +498,150 @@
       </aside>
     </main>
 
+    <div class="modal fade" id="annotationContractModal" tabindex="-1" aria-labelledby="annotationContractTitle" aria-hidden="true">
+      <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+          <div class="modal-header align-items-start">
+            <div>
+              <h2 id="annotationContractTitle" class="modal-title h5 mb-1">Developer diagnostics</h2>
+              <div class="small text-secondary">Active Mistral request contract and current review timing</div>
+              <div class="d-flex flex-wrap align-items-center gap-2 mt-1 small text-secondary">
+                <code id="developerDiagnosticsOrigin" class="text-body"></code>
+                <span aria-hidden="true">·</span>
+                <span id="developerDiagnosticsTime"></span>
+              </div>
+            </div>
+            <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="border-bottom px-4">
+            <ul class="nav nav-tabs border-0" id="developerDiagnosticsTabs" role="tablist">
+              <li class="nav-item" role="presentation"><button class="nav-link active" id="annotationSourceTab" data-bs-toggle="tab" data-bs-target="#annotationSourcePane" type="button" role="tab" aria-controls="annotationSourcePane" aria-selected="true">1. Source scope</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="annotationContractTab" data-bs-toggle="tab" data-bs-target="#annotationContractPane" type="button" role="tab" aria-controls="annotationContractPane" aria-selected="false">2. Annotation contract</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="bodyCitationsTab" data-bs-toggle="tab" data-bs-target="#bodyCitationsPane" type="button" role="tab" aria-controls="bodyCitationsPane" aria-selected="false">3. Body citations</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="documentQnaTab" data-bs-toggle="tab" data-bs-target="#documentQnaPane" type="button" role="tab" aria-controls="documentQnaPane" aria-selected="false">4. Document QnA</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="runtimeSummaryTab" data-bs-toggle="tab" data-bs-target="#runtimeSummaryPane" type="button" role="tab" aria-controls="runtimeSummaryPane" aria-selected="false">Runtime summary</button></li>
+            </ul>
+          </div>
+          <div class="modal-body p-0 overflow-hidden">
+            <div class="tab-content h-100">
+              <section class="tab-pane fade h-100 overflow-auto" id="annotationContractPane" role="tabpanel" aria-labelledby="annotationContractTab" tabindex="0">
+                <div class="container-fluid p-4">
+                  <div class="row g-4">
+                    <div class="col-12 col-xl-7">
+                      <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+                        <div><h3 class="h6 font-monospace mb-1">document_annotation_format</h3><p class="small text-secondary mb-0">The required response shape sent to Mistral.</p></div>
+                        <span class="badge text-bg-light border fw-normal">JSON Schema</span>
+                      </div>
+                      <div id="annotationFormatOverview" class="accordion mb-3"></div>
+                      <div class="accordion" id="annotationFormatAccordion">
+                        <div class="accordion-item">
+                          <h4 class="accordion-header"><button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#annotationFormatRaw" aria-expanded="false" aria-controls="annotationFormatRaw">View exact JSON schema</button></h4>
+                          <div id="annotationFormatRaw" class="accordion-collapse collapse" data-bs-parent="#annotationFormatAccordion"><div class="accordion-body p-0"><pre class="developer-contract-code"><code id="annotationFormatCode"></code></pre></div></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-12 col-xl-5">
+                      <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+                        <div><h3 class="h6 font-monospace mb-1">document_annotation_prompt</h3><p class="small text-secondary mb-0">The extraction instructions applied to every annotation request.</p></div>
+                        <span class="badge text-bg-light border fw-normal">Instructions</span>
+                      </div>
+                      <ol id="annotationPromptInstructions" class="small text-body ps-4 mb-3"></ol>
+                      <div class="accordion" id="annotationPromptAccordion">
+                        <div class="accordion-item">
+                          <h4 class="accordion-header"><button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#annotationPromptRaw" aria-expanded="false" aria-controls="annotationPromptRaw">View exact prompt</button></h4>
+                          <div id="annotationPromptRaw" class="accordion-collapse collapse" data-bs-parent="#annotationPromptAccordion"><div class="accordion-body p-0"><pre id="annotationPromptText" class="developer-contract-code developer-contract-prompt"></pre></div></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="tab-pane fade show active h-100 overflow-auto" id="annotationSourcePane" role="tabpanel" aria-labelledby="annotationSourceTab" tabindex="0">
+                <div class="container-lg p-4">
+                  <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+                    <div><h3 class="h6 mb-1">Annotation source scopes</h3><p class="small text-secondary mb-0">Model-returned manuscript regions and raw OCR bibliography input, ordered by their first appearance.</p></div>
+                    <span class="badge text-bg-light border fw-normal">Raw OCR</span>
+                  </div>
+                  <div id="annotationSourceScopeSummary" class="mb-3"></div>
+                  <div id="annotationSourceScopeList" class="accordion mb-3"></div>
+                  <div class="accordion mb-4" id="annotationCombinedReferenceAccordion">
+                    <div class="accordion-item">
+                      <h4 class="accordion-header"><button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#annotationCombinedReferenceTextWrap" aria-expanded="false" aria-controls="annotationCombinedReferenceTextWrap">View combined reference-block input</button></h4>
+                      <div id="annotationCombinedReferenceTextWrap" class="accordion-collapse collapse" data-bs-parent="#annotationCombinedReferenceAccordion"><div class="accordion-body p-0"><pre id="annotationCombinedReferenceText" class="developer-contract-code"></pre></div></div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="tab-pane fade h-100 overflow-auto" id="bodyCitationsPane" role="tabpanel" aria-labelledby="bodyCitationsTab" tabindex="0">
+                <div class="container-fluid p-4">
+                  <div class="row g-4 mb-4">
+                    <div class="col-12 col-xl-7">
+                      <h3 class="h6 font-monospace mb-1">document_annotation_format</h3>
+                      <p class="small text-secondary mb-3">Focused schema used only to extract citation groups from model-selected article pages.</p>
+                      <pre class="developer-contract-code"><code id="citationAnnotationFormatCode"></code></pre>
+                    </div>
+                    <div class="col-12 col-xl-5">
+                      <h3 class="h6 font-monospace mb-1">document_annotation_prompt</h3>
+                      <p class="small text-secondary mb-3">The bounded instruction for the body-citation extraction stage.</p>
+                      <ol id="citationAnnotationPromptInstructions" class="small text-body ps-4 mb-0"></ol>
+                    </div>
+                  </div>
+                  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+                    <div>
+                      <h3 class="h6 mb-1">Citation extraction audit</h3>
+                      <p class="small text-secondary mb-0">Citations returned per body-page range and their passive exact-quote checks against raw OCR.</p>
+                    </div>
+                    <div id="citationGroundingAuditMetrics" class="d-flex flex-wrap gap-2"></div>
+                  </div>
+                  <div id="citationGroundingAudit" class="accordion"></div>
+                </div>
+              </section>
+              <section class="tab-pane fade h-100 overflow-auto" id="documentQnaPane" role="tabpanel" aria-labelledby="documentQnaTab" tabindex="0">
+                <div class="container-lg p-4">
+                  <div class="mb-4">
+                    <h3 class="h6 mb-1">Relational source linking</h3>
+                    <p class="small text-secondary mb-0">Document QnA maps already extracted source handles. It maps bibliography entries to body citations and tables or figures to body-text mentions; it does not extract manuscript entities.</p>
+                  </div>
+                  <div id="documentQnaOverview" class="vstack gap-3"></div>
+                </div>
+              </section>
+              <section class="tab-pane fade h-100 overflow-auto" id="runtimeSummaryPane" role="tabpanel" aria-labelledby="runtimeSummaryTab" tabindex="0">
+                <div class="container-fluid p-4">
+                  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
+                    <div>
+                      <h3 class="h6 mb-1">Review processing flow</h3>
+                      <p class="small text-secondary mb-0">A read-only view of when each result became available and which work continued in the background.</p>
+                    </div>
+                    <div id="runtimeSummaryMetrics" class="d-flex flex-wrap gap-2"></div>
+                  </div>
+                  <div id="runtimeFlowDiagram" class="runtime-flow mb-4" aria-label="Review processing stages"></div>
+                  <div class="d-flex align-items-center justify-content-between gap-3 mb-2">
+                    <h3 class="h6 mb-0">Result readiness</h3>
+                    <span class="small text-secondary">Count and source-link timing by tile</span>
+                  </div>
+                  <div id="runtimeCategoryFlow" class="table-responsive border rounded-3 mb-4"></div>
+                  <div class="accordion" id="runtimeEventAccordion">
+                    <div class="accordion-item">
+                      <h3 class="accordion-header">
+                        <button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#runtimeEventLog" aria-expanded="false" aria-controls="runtimeEventLog">Event log</button>
+                      </h3>
+                      <div id="runtimeEventLog" class="accordion-collapse collapse" data-bs-parent="#runtimeEventAccordion">
+                        <div class="accordion-body"><div id="runtimeSummarySections" class="vstack gap-2"></div></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="modal fade" id="customizeChecksModal" tabindex="-1" aria-labelledby="customizeChecksTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><div><h2 id="customizeChecksTitle" class="modal-title h5">Customize checks</h2><div class="small text-secondary">Choose which check groups appear in the reader.</div></div><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body bg-body-tertiary"><div class="row g-0 border rounded overflow-hidden bg-body"><aside class="col-12 col-md-3 border-end p-3"><div class="nav nav-pills flex-column gap-1"><button class="nav-link active text-start" type="button">Article counts</button><button class="nav-link text-start" type="button">Essential guidelines</button><button class="nav-link text-start" type="button">Reporting guidelines</button><button class="nav-link text-start" type="button">Custom guides</button></div></aside><div class="col p-4"><h3 class="h6">Article element counts</h3><p class="lead fs-6 text-secondary">Source-linked inventory of manuscript elements.</p><p class="small text-secondary mb-4">Counts are derived from the returned document map and open a source-grounded details panel.</p><button class="btn btn-primary" type="button">Included <i class="bi bi-check-lg ms-1"></i></button></div></div></div><div class="modal-footer"><button class="btn btn-dark" type="button" data-bs-dismiss="modal">Done</button></div></div></div></div>
     <div class="modal fade" id="guidelineSelectorModal" tabindex="-1" aria-label="Guideline selection" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-body p-0 guideline-selector-modal-body d-flex position-relative overflow-hidden"><button class="btn-close position-absolute top-0 end-0 m-3 z-3" type="button" data-bs-dismiss="modal"></button><aside class="guideline-facets border-end bg-light-subtle p-3 pt-5"><div class="small text-uppercase text-secondary mb-2">Guidelines</div><button class="btn btn-link text-decoration-none text-start w-100 active" type="button">All guidelines</button><button class="btn btn-link text-decoration-none text-start w-100" type="button">Essential guides</button><button class="btn btn-link text-decoration-none text-start w-100" type="button">Reporting guides</button><button class="btn btn-link text-decoration-none text-start w-100" type="button">Custom guides</button></aside><div class="d-flex flex-column flex-grow-1 p-4"><input class="form-control mb-4" type="search" placeholder="Find a guideline by name, domain, or study type"><div class="guideline-card-grid"><button class="card border-0 shadow-sm text-start guideline-select-card" type="button" data-open-guideline="CONSORT"><span class="card-body"><span class="h6 d-block mb-2">CONSORT</span><span class="small text-secondary">Randomised trials</span></span></button><button class="card border-0 shadow-sm text-start guideline-select-card" type="button" data-open-guideline="EASE Essential"><span class="card-body"><span class="h6 d-block mb-2">EASE Essential guidelines</span><span class="small text-secondary">Clear scientific reporting</span></span></button></div></div><section id="guidelineDetailSlider" class="guideline-detail-slider bg-body d-flex flex-column"><div class="d-flex justify-content-end p-3"><button id="closeGuidelineDetailSlider" class="btn btn-light border" type="button" aria-label="Close guideline details"><i class="bi bi-chevron-right"></i></button></div><div class="p-4 pt-2 overflow-auto"><h3 id="guidelineDetailName" class="h4">Select a guideline</h3><p class="text-secondary">Explore the original checklist, scope, and source publication.</p><ul class="nav nav-underline mb-3"><li class="nav-item"><button class="nav-link active" type="button">Checklist</button></li><li class="nav-item"><button class="nav-link" type="button">Aims &amp; scope</button></li><li class="nav-item"><button class="nav-link" type="button">References</button></li></ul><div class="list-group list-group-flush"><div class="list-group-item px-0"><div class="fw-medium">Checklist item</div><div class="small text-secondary mt-1">Guideline details appear here.</div></div></div></div></section></div></div></div></div>
     <div class="modal fade" id="feedbackReportModal" tabindex="-1" aria-labelledby="feedbackReportTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 id="feedbackReportTitle" class="modal-title fs-5">Feedback report</h2><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body bg-body-tertiary"><div class="empty-note">A feedback report will be generated from completed checks.</div></div><div class="modal-footer"><button class="btn btn-dark" type="button">Save as PDF</button></div></div></div></div>
+    <div class="modal fade" id="storedReviewsModal" tabindex="-1" aria-labelledby="storedReviewsTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><div><h2 id="storedReviewsTitle" class="modal-title fs-6">Stored desk reviews</h2><div class="small text-secondary">Private to this browser</div></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><div class="d-flex justify-content-end mb-3"><label class="btn btn-primary btn-sm mb-0"><i class="bi bi-upload me-1" aria-hidden="true"></i>Upload PDF<input id="storedReviewsPdfInput" class="visually-hidden" type="file" accept="application/pdf"></label></div><div id="storedReviewsEmpty" class="empty-note text-center py-5 d-none"><i class="bi bi-archive d-block fs-4 mb-2" aria-hidden="true"></i><div class="fw-semibold mb-1">No stored desk reviews yet</div><div class="small text-secondary">Uploaded manuscripts that finish analysis will appear here.</div></div><div id="storedReviewsTableWrap" class="table-responsive"><table class="table table-hover align-middle mb-0 home-stored-table"><thead><tr><th scope="col">Manuscript</th><th scope="col">Pages</th><th scope="col">Counts</th><th scope="col">Stored</th><th scope="col" class="text-end">Actions</th></tr></thead><tbody id="reviewLibraryBody"></tbody></table></div></div></div></div></div>
     <div class="modal fade" id="reviewerFormModal" tabindex="-1" aria-labelledby="reviewerFormTitle" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 id="reviewerFormTitle" class="modal-title fs-5">Reviewer form</h2><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="form-label" for="reviewerFormName">Name</label><input id="reviewerFormName" class="form-control mb-3" placeholder="e.g. Statistical review checklist"><label class="form-label" for="reviewerFormDescription">Description</label><textarea id="reviewerFormDescription" class="form-control" rows="4"></textarea></div><div class="modal-footer"><button class="btn btn-light border" type="button" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="button" data-bs-dismiss="modal">Save reviewer form</button></div></div></div></div>
-    <div class="modal fade" id="runtimeSummaryModal" tabindex="-1" aria-labelledby="runtimeSummaryTitle" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 id="runtimeSummaryTitle" class="modal-title fs-6">Runtime summary</h2><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="runtimeSummarySections" class="vstack gap-2"></div></div></div></div></div>
     <div class="modal fade" id="homeDemoModal" tabindex="-1" aria-labelledby="homeDemoTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content overflow-hidden"><div class="modal-header"><h2 id="homeDemoTitle" class="modal-title fs-6">DeskReview demo</h2><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body p-0"><video id="homeDemoVideo" class="w-100 d-block" controls preload="metadata"><source src="/assets/demo.mp4" type="video/mp4"></video></div></div></div></div>
     <script src="/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
     <script type="module" src="/app.js"></script>

@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, relative, resolve } from 'node:path';
-import { analysePayload, MAX_PDF_BYTES } from './analysis-service.js';
+import { annotationChunkPayload, citationAnnotationPayload, displayLinksPayload, MAX_PDF_BYTES, rawOcrPayload, referenceAnnotationPayload, referenceLinksPayload } from './analysis-service.js';
+import { lookupAuthorProfiles } from './author-profile-service.js';
 import { createRequestGuard } from './request-guard.js';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
@@ -19,6 +20,7 @@ const roots = [
 ];
 const DEV_REVISION_FILES = ['public/index.html', 'public/styles.css', 'public/home.js', 'public/app.js', 'public/assets/ambient-paper-v2.svg'];
 const requestGuard = createRequestGuard();
+const authorProfileGuard = createRequestGuard({ env: { ...process.env, OCR_RATE_LIMIT_MAX: process.env.AUTHOR_PROFILE_RATE_LIMIT_MAX || '10', OCR_MAX_CONCURRENT: process.env.AUTHOR_PROFILE_MAX_CONCURRENT || '3' }, label: 'author profile' });
 
 async function loadLocalEnv() {
   try {
@@ -82,15 +84,63 @@ async function developmentRevision() {
   return String(Math.max(...changes));
 }
 
-async function analyse(req, res) {
+async function rawOcr(req, res) {
   const lease = requestGuard.acquire(req);
+  if (lease.rejected) return sendJson(res, { error: lease.rejected.error }, lease.rejected.status);
+  try { const payload = await readJson(req); const result = await rawOcrPayload(payload); return sendJson(res, result.value, result.status); }
+  catch (error) { return sendJson(res, { error: error.message || 'Invalid upload.' }, 400); }
+  finally { lease.release(); }
+}
+
+async function annotationChunk(req, res) {
+  const lease = requestGuard.acquire(req);
+  if (lease.rejected) return sendJson(res, { error: lease.rejected.error }, lease.rejected.status);
+  try { const payload = await readJson(req); const result = await annotationChunkPayload(payload); return sendJson(res, result.value, result.status); }
+  catch (error) { return sendJson(res, { error: error.message || 'Invalid annotation request.' }, 400); }
+  finally { lease.release(); }
+}
+
+async function referenceAnnotation(req, res) {
+  const lease = requestGuard.acquire(req);
+  if (lease.rejected) return sendJson(res, { error: lease.rejected.error }, lease.rejected.status);
+  try { const payload = await readJson(req); const result = await referenceAnnotationPayload(payload); return sendJson(res, result.value, result.status); }
+  catch (error) { return sendJson(res, { error: error.message || 'Invalid reference annotation request.' }, 400); }
+  finally { lease.release(); }
+}
+
+async function citationAnnotation(req, res) {
+  const lease = requestGuard.acquire(req);
+  if (lease.rejected) return sendJson(res, { error: lease.rejected.error }, lease.rejected.status);
+  try { const payload = await readJson(req); const result = await citationAnnotationPayload(payload); return sendJson(res, result.value, result.status); }
+  catch (error) { return sendJson(res, { error: error.message || 'Invalid body citation annotation request.' }, 400); }
+  finally { lease.release(); }
+}
+
+async function displayLinks(req, res) {
+  const lease = requestGuard.acquire(req);
+  if (lease.rejected) return sendJson(res, { error: lease.rejected.error }, lease.rejected.status);
+  try { const payload = await readJson(req); const result = await displayLinksPayload(payload); return sendJson(res, result.value, result.status); }
+  catch (error) { return sendJson(res, { error: error.message || 'Invalid source-link request.' }, 400); }
+  finally { lease.release(); }
+}
+
+async function referenceLinks(req, res) {
+  const lease = requestGuard.acquire(req);
+  if (lease.rejected) return sendJson(res, { error: lease.rejected.error }, lease.rejected.status);
+  try { const payload = await readJson(req); const result = await referenceLinksPayload(payload); return sendJson(res, result.value, result.status); }
+  catch (error) { return sendJson(res, { error: error.message || 'Invalid reference-link request.' }, 400); }
+  finally { lease.release(); }
+}
+
+async function authorProfiles(req, res) {
+  const lease = authorProfileGuard.acquire(req);
   if (lease.rejected) return sendJson(res, { error: lease.rejected.error }, lease.rejected.status);
   try {
     const payload = await readJson(req);
-    const result = await analysePayload(payload);
+    const result = await lookupAuthorProfiles(payload);
     return sendJson(res, result.value, result.status);
   } catch (error) {
-    return sendJson(res, { error: error.message || 'Invalid upload.' }, 400);
+    return sendJson(res, { error: error.message || 'Invalid author profile request.' }, 400);
   } finally {
     lease.release();
   }
@@ -104,6 +154,12 @@ function notFound(res) {
 createServer((req, res) => {
   const pathname = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`).pathname;
   if (IS_DEVELOPMENT && req.method === 'GET' && pathname === '/__deskreview_dev_revision') return developmentRevision().then((revision) => sendJson(res, { revision })).catch(() => sendJson(res, { revision: 'unavailable' }));
-  if (req.method === 'POST' && pathname === '/api/ocr/analyse') return analyse(req, res);
+  if (req.method === 'POST' && pathname === '/api/ocr/raw') return rawOcr(req, res);
+  if (req.method === 'POST' && pathname === '/api/ocr/annotate') return annotationChunk(req, res);
+  if (req.method === 'POST' && pathname === '/api/ocr/citations') return citationAnnotation(req, res);
+  if (req.method === 'POST' && pathname === '/api/ocr/references') return referenceAnnotation(req, res);
+  if (req.method === 'POST' && pathname === '/api/ocr/display-links') return displayLinks(req, res);
+  if (req.method === 'POST' && pathname === '/api/ocr/reference-links') return referenceLinks(req, res);
+  if (req.method === 'POST' && pathname === '/api/author-profiles') return authorProfiles(req, res);
   return serve(req, res);
 }).listen(PORT, '127.0.0.1', () => console.log(`deskreview-mistral-3 listening on http://127.0.0.1:${PORT}`));

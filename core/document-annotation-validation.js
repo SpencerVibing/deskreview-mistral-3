@@ -1,16 +1,43 @@
 function object(value) { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
-function source(value) { return object(value) && Number.isInteger(value.page_number) && value.page_number > 0 && typeof value.exact_quote === 'string' && value.exact_quote.trim().length > 0; }
-function textItem(value) { return object(value) && typeof value.text === 'string' && source(value.source); }
-
+function source(value) {
+  return object(value)
+    && /^ocr-page-\d+$/.test(String(value.ocr_page_id || ''))
+    && /^ocr-block-\d+-\d+$/.test(String(value.ocr_block_id || ''))
+    && typeof value.exact_quote === 'string'
+    && value.exact_quote.trim().length > 0
+    && value.exact_quote.length <= 1200;
+}
+function array(value, validate) { return Array.isArray(value) && value.every(validate); }
+function id(value) { return typeof value === 'string' && value.trim().length > 0; }
+function sourceItem(value) { return object(value) && id(value.id) && id(value.label) && id(value.item_exact_quote) && source(value.source); }
+function author(value) { return object(value) && id(value.id) && id(value.label) && typeof value.orcid === 'string' && source(value.source); }
+function link(value) { return object(value) && id(value.author_id) && id(value.affiliation_id); }
+function abstract(value) { return object(value) && source(value.source); }
+function proseBlockTypes(value) { return object(value) && Object.entries(value).every(([key, type]) => /^ocr-block-\d+-\d+ :: .+/.test(key) && ['abstract', 'article', 'excluded'].includes(type)); }
+function section(value) { return object(value) && id(value.id) && id(value.heading) && Number.isInteger(value.level) && value.level >= 1 && value.level <= 6 && source(value.source); }
+function display(value) { return object(value) && id(value.id) && ['table', 'figure'].includes(value.kind) && id(value.label) && source(value.source); }
+function mention(value) { return sourceItem(value); }
 /** Passive validation only. Invalid model data is rejected; it is never repaired. */
-export function hasValidDocumentAnnotation(annotation) {
-  if (!object(annotation) || !object(annotation.front_matter) || !object(annotation.body) || !object(annotation.references)) return false;
+export function documentAnnotationIssues(annotation) {
+  if (!object(annotation) || !object(annotation.front_matter) || !object(annotation.body) || !object(annotation.displays)) return ['Missing a required top-level result group.'];
   const front = annotation.front_matter;
   const body = annotation.body;
-  const bibliography = annotation.references;
-  if (!textItem(front.title) || !Array.isArray(front.authors) || !front.authors.every(textItem) || !Array.isArray(front.affiliations) || !front.affiliations.every(textItem) || !Array.isArray(front.keywords) || !front.keywords.every(textItem)) return false;
-  if (!object(front.abstract) || typeof front.abstract.text !== 'string' || !Number.isInteger(front.abstract.word_count) || front.abstract.word_count < 0 || !source(front.abstract.source)) return false;
-  if (!Array.isArray(body.sections) || !body.sections.every((item) => object(item) && typeof item.heading === 'string' && Number.isInteger(item.level) && item.level >= 1 && item.level <= 6 && typeof item.text === 'string' && Number.isInteger(item.word_count) && item.word_count >= 0 && source(item.source))) return false;
-  if (!Array.isArray(body.display_items) || !body.display_items.every((item) => object(item) && ['table', 'figure'].includes(item.kind) && typeof item.label === 'string' && source(item.source))) return false;
-  return Array.isArray(bibliography.references) && bibliography.references.every((item) => object(item) && Number.isInteger(item.number) && item.number >= 1 && typeof item.text === 'string' && source(item.source));
+  const displays = annotation.displays;
+  const issues = [];
+  const check = (valid, label) => { if (!valid) issues.push(label); };
+  check(array(front.titles, sourceItem), 'front_matter.titles contains an invalid item.');
+  check(array(front.authors, author), 'front_matter.authors contains an invalid item.');
+  check(array(front.affiliations, sourceItem), 'front_matter.affiliations contains an invalid item.');
+  check(array(front.author_affiliation_links, link), 'front_matter.author_affiliation_links contains an invalid item.');
+  check(array(front.keywords, sourceItem), 'front_matter.keywords contains an invalid item.');
+  check(array(front.abstracts, abstract), 'front_matter.abstracts contains an invalid item.');
+  check(array(body.sections, section), 'body.sections contains an invalid item.');
+  check(array(body.display_mentions, mention), 'body.display_mentions contains an invalid item.');
+  check(proseBlockTypes(body.prose_block_types), 'body.prose_block_types contains an invalid item.');
+  check(array(displays.entries, display), 'displays.entries contains an invalid item.');
+  return issues;
+}
+
+export function hasValidDocumentAnnotation(annotation) {
+  return documentAnnotationIssues(annotation).length === 0;
 }

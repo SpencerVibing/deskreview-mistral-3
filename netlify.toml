@@ -1,9 +1,56 @@
 [build]
-  publish = "public"
+  command = "npm run build"
+  publish = "dist"
   functions = "netlify/functions"
 
 [[redirects]]
-  from = "/api/ocr/analyse"
-  to = "/.netlify/functions/ocr"
+  from = "/api/ocr/raw"
+  to = "/.netlify/functions/ocr?stage=raw"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/api/ocr/annotate"
+  to = "/.netlify/functions/ocr?stage=annotate"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/ocr/references"
+  to = "/.netlify/functions/ocr?stage=references"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/ocr/citations"
+  to = "/.netlify/functions/ocr?stage=citations"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/ocr/display-links"
+  to = "/.netlify/functions/ocr?stage=display-links"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/ocr/reference-links"
+  to = "/.netlify/functions/ocr?stage=reference-links"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/author-profiles"
+  to = "/.netlify/functions/author-profiles"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "same-origin"
+    Cross-Origin-Resource-Policy = "same-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy = "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self'; img-src 'self' blob: data:; frame-src 'self' blob:;"

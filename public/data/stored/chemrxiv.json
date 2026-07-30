@@ -3069,5 +3069,41 @@
         }
       ]
     }
-  }
+  },
+  "authorProfiles": [
+    {
+      "name": "Kenneth Ruffatto",
+      "status": "found",
+      "openAlexUrl": "https://openalex.org/A5020506639",
+      "orcidUrl": "https://orcid.org/0000-0003-0867-0319",
+      "worksCount": 0,
+      "citedByCount": 0
+    },
+    {
+      "name": "Andrew J. Margenot",
+      "status": "found",
+      "openAlexUrl": "https://openalex.org/A5033548666",
+      "orcidUrl": "https://orcid.org/0000-0003-0185-8650",
+      "worksCount": 0,
+      "citedByCount": 0
+    },
+    {
+      "name": "Vijay Singh",
+      "status": "not_found",
+      "googleScholarUrl": "https://scholar.google.com/scholar?q=Vijay+Singh"
+    },
+    {
+      "name": "Rebecca L. Muenich",
+      "status": "not_found",
+      "googleScholarUrl": "https://scholar.google.com/scholar?q=Rebecca+L.+Muenich"
+    },
+    {
+      "name": "Roland D. Cusick",
+      "status": "found",
+      "openAlexUrl": "https://openalex.org/A5021965731",
+      "orcidUrl": "https://orcid.org/0000-0002-4037-2939",
+      "worksCount": 0,
+      "citedByCount": 0
+    }
+  ]
 }

@@ -19,7 +19,7 @@ export function inlineMarkdown(value = '') {
 }
 
 export function markdownLabel(value = '') {
-  return plain(String(value).replace(/\*\*([\s\S]+?)\*\*/g, '$1').replace(/__([\s\S]+?)__/g, '$1').replace(/\*([^*\n]+)\*/g, '$1').replace(/_([^_\n]+)_/g, '$1'));
+  return plain(String(value).replace(/\*\*([\s\S]+?)\*\*/g, '$1').replace(/__([\s\S]+?)__/g, '$1').replace(/\*([^*\n]+)\*/g, '$1').replace(/_([^_\n]+)_/g, '$1')).replace(/\s+/g, ' ').trim();
 }
 
 export function headingLabel(value = '') {

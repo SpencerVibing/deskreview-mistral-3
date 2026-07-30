@@ -2,14 +2,26 @@ import { getDocument, GlobalWorkerOptions } from '/vendor/pdfjs/build/pdf.mjs';
 import { initHome, refreshHome } from '/home.js';
 import { loadReview, saveReview } from '/review-store.js';
 import { validateDeclaredSource } from '/core/source-anchor.js';
-import { createRuntimeLog } from '/app/runtime-log.js';
+import { createRuntimeLog, runtimeFlowModel } from '/app/runtime-log.js';
 import { headingLabel, inlineMarkdown, markdownLabel, plain, renderMarkdown } from '/app/markdown.js';
 import { projectAnnotation } from '/app/annotation-projection.js';
+import { googleScholarUrl } from '/core/author-profiles.js';
+import { projectAffiliationLinkage } from '/core/affiliation-linkage.js';
+import { applySourceLinks, projectAnnotationChunks } from '/core/annotation-stages.js';
+import { annotationManifestIsComplete, annotationManifestSummary, createAnnotationRunManifest, markAnnotationRange } from '/core/annotation-manifest.js';
+import { wordCountProvenanceFromBlocks } from '/core/article-word-count.js';
+import { documentAnnotationSourcePageMap } from '/core/document-annotation.js';
+import { referenceBlocksFromRawPages } from '/core/reference-annotation.js';
+import { applyReferenceLinks } from '/core/reference-links-contract.js';
+import { bindCitationAnnotationRanges, bodyCitationPageRanges, citationAnnotationFormat, citationAnnotationPromptInstructions } from '/core/citation-annotation.js';
 
 GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.mjs';
 
 const el = (selector) => document.querySelector(selector);
-const state = { tocWidth: 288, countsWidth: 448, resizing: null, raw: null, openDetailKind: '', pdf: null, pdfRenderToken: 0, pdfResizeTimer: null, search: { query: '', matches: [], index: -1 }, annotations: { 'front-matter': null, body: null, references: null }, annotationStatus: { 'front-matter': 'idle', body: 'idle', references: 'idle' } };
+const categoryKinds = ['authors', 'affiliations', 'abstract', 'article', 'keywords', 'references', 'tables', 'figures'];
+const categoryLabels = { authors: 'Authors', affiliations: 'Affiliations', abstract: 'Abstract', article: 'Article', keywords: 'Keywords', references: 'References', tables: 'Tables', figures: 'Figures' };
+function initialCategoryStates(value = 'waiting') { return Object.fromEntries(categoryKinds.map((kind) => [kind, value])); }
+const state = { tocWidth: 288, countsWidth: 448, resizing: null, raw: null, openDetailKind: '', pdf: null, pdfRenderToken: 0, pdfResizeTimer: null, search: { query: '', matches: [], index: -1 }, annotations: { 'front-matter': null, body: null, references: null }, annotationChunks: [], annotationCandidates: null, citationExtraction: { status: 'idle', ranges: [], candidates: [] }, documentQna: { references: null, displays: [] }, annotationStatus: { 'front-matter': 'idle', body: 'idle', references: 'idle' }, annotationCoverage: { ranges: [], completed: [], failed: [] }, categoryStates: initialCategoryStates(), sourceLinksStatus: 'idle', sourceLinksByKind: { tables: 'idle', figures: 'idle' }, referenceLinksStatus: 'idle', authorProfiles: { status: 'idle', authors: [] }, authorProfileToken: 0, affiliationFilter: 'all', currentReview: null, preservingRuntimeSnapshot: false };
 const runtime = createRuntimeLog();
 const input = el('#pdfInput');
 const reader = el('#reader');
@@ -27,34 +39,776 @@ const homeView = el('#homeView');
 if (new URLSearchParams(window.location.search).get('ambient') === 'on') document.documentElement.classList.add('force-ambient-motion');
 
 function showHome() { closeDetails(); homeView.classList.remove('d-none'); reader.classList.add('d-none'); history.replaceState({}, '', '/'); refreshHome({ onOpenReview: openHomeReview }).catch(() => {}); }
-function showReader() { homeView.classList.add('d-none'); reader.classList.remove('d-none'); }
+function showReader() { homeView.classList.add('d-none'); reader.classList.remove('d-none'); triggerReaderReveal(); }
+function triggerReaderReveal() { reader.classList.remove('reader-reveal'); void reader.offsetWidth; reader.classList.add('reader-reveal'); }
+async function openStoredReviewsLibrary() {
+  showReader();
+  await refreshHome({ onOpenReview: openHomeReview });
+  window.bootstrap?.Modal.getOrCreateInstance(el('#storedReviewsModal'))?.show();
+}
 
-function startRuntime() { runtime.reset(); }
-function recordRuntime(label, detail = '', key = label) { runtime.record(label, detail, key); }
-function renderRuntimeSummary() { const container = el('#runtimeSummarySections'); const events = runtime.entries(); container.replaceChildren(); if (!events.length) { const empty = document.createElement('div'); empty.className = 'text-secondary small'; empty.textContent = 'No runtime data yet.'; container.append(empty); return; } events.forEach((event) => { const row = document.createElement('div'); row.className = 'd-flex align-items-start justify-content-between gap-3 border-bottom pb-2'; const text = document.createElement('div'); const title = document.createElement('div'); title.className = 'small fw-semibold'; title.textContent = event.label; const detail = document.createElement('div'); detail.className = 'small text-secondary mt-1'; detail.textContent = event.detail; text.append(title); if (event.detail) text.append(detail); const time = document.createElement('time'); time.className = 'small text-secondary text-nowrap'; time.textContent = `+${(event.elapsedMs / 1000).toFixed(1)} s`; row.append(text, time); container.append(row); }); }
+function startRuntime(snapshot = null) { if (Array.isArray(snapshot) && snapshot.length) runtime.restore(snapshot); else runtime.reset(); }
+function recordRuntime(label, detail = '', key = label, data = null) {
+  runtime.record(label, detail, key, data);
+  if (el('#annotationContractModal')?.classList.contains('show') && el('#runtimeSummaryPane')?.classList.contains('active')) renderRuntimeSummary();
+}
+function persistAuthorProfiles(profiles) { if (!state.currentReview) return; state.currentReview.authorProfiles = profiles; saveReview(state.currentReview).catch(() => {}); }
+function runtimeTime(elapsedMs) { return Number.isFinite(elapsedMs) ? `+${(elapsedMs / 1000).toFixed(1)} s` : '—'; }
+function runtimeStateLabel(value) { return { ready: 'Ready', pending: 'In progress', unavailable: 'Unavailable', blocked: 'Blocked', waiting: 'No event yet' }[value] || 'No event yet'; }
+function runtimeStatus(value, elapsedMs, detail = '') {
+  const wrap = document.createElement('span');
+  wrap.className = 'runtime-status d-inline-flex align-items-center gap-2';
+  wrap.dataset.runtimeState = value;
+  if (detail) wrap.title = detail;
+  const dot = document.createElement('span');
+  dot.className = 'runtime-status-dot flex-shrink-0';
+  dot.setAttribute('aria-hidden', 'true');
+  const text = document.createElement('span');
+  text.className = 'small';
+  text.textContent = `${runtimeStateLabel(value)}${Number.isFinite(elapsedMs) ? ` · ${runtimeTime(elapsedMs)}` : ''}`;
+  wrap.append(dot, text);
+  return wrap;
+}
+function renderRuntimeSummary() {
+  const events = runtime.entries();
+  const flow = runtimeFlowModel(events);
+  const metrics = el('#runtimeSummaryMetrics');
+  const diagram = el('#runtimeFlowDiagram');
+  const categories = el('#runtimeCategoryFlow');
+  const eventLog = el('#runtimeSummarySections');
+  metrics.replaceChildren();
+  diagram.replaceChildren();
+  categories.replaceChildren();
+  eventLog.replaceChildren();
+  [
+    ['Elapsed', runtimeTime(flow.elapsedMs)],
+    ['Counts ready', `${flow.countsReady}/${flow.resultCount}`],
+    ['Source links ready', `${flow.linksReady}/${flow.resultCount}`]
+  ].forEach(([label, value]) => {
+    const metric = document.createElement('div');
+    metric.className = 'border rounded-3 bg-body px-3 py-2';
+    const valueNode = document.createElement('div');
+    valueNode.className = 'small fw-semibold';
+    valueNode.textContent = value;
+    const labelNode = document.createElement('div');
+    labelNode.className = 'small text-secondary';
+    labelNode.textContent = label;
+    metric.append(valueNode, labelNode);
+    metrics.append(metric);
+  });
+  flow.stages.forEach((item) => {
+    const node = document.createElement('div');
+    node.className = 'runtime-flow-stage position-relative border rounded-3 bg-body p-3';
+    node.dataset.runtimeState = item.state;
+    const top = document.createElement('div');
+    top.className = 'd-flex align-items-center justify-content-between gap-2 mb-2';
+    const icon = document.createElement('i');
+    icon.className = `bi ${item.icon} text-secondary`;
+    icon.setAttribute('aria-hidden', 'true');
+    top.append(icon, runtimeStatus(item.state, null, item.detail));
+    const label = document.createElement('div');
+    label.className = 'small fw-semibold';
+    label.textContent = item.label;
+    const time = document.createElement('div');
+    time.className = 'small text-secondary mt-1';
+    time.textContent = runtimeTime(item.elapsedMs);
+    node.append(top, label, time);
+    diagram.append(node);
+  });
+  const table = document.createElement('table');
+  table.className = 'table table-sm align-middle mb-0 runtime-result-table';
+  const thead = document.createElement('thead');
+  thead.className = 'table-light';
+  thead.innerHTML = '<tr><th scope="col">Result</th><th scope="col">Count</th><th scope="col">Item links</th><th scope="col">Additional check</th></tr>';
+  const tbody = document.createElement('tbody');
+  flow.results.forEach((result) => {
+    const row = document.createElement('tr');
+    row.dataset.runtimeResult = result.kind;
+    const label = document.createElement('th');
+    label.scope = 'row';
+    label.className = 'fw-medium';
+    const inspect = document.createElement('button');
+    inspect.className = 'btn btn-sm btn-link link-body-emphasis text-decoration-none p-0 d-inline-flex align-items-center gap-2';
+    inspect.type = 'button';
+    inspect.dataset.bsToggle = 'collapse';
+    inspect.dataset.bsTarget = `#runtime-dependencies-${result.kind}`;
+    inspect.setAttribute('aria-expanded', 'false');
+    inspect.setAttribute('aria-controls', `runtime-dependencies-${result.kind}`);
+    const inspectLabel = document.createElement('span');
+    inspectLabel.textContent = result.label;
+    const inspectIcon = document.createElement('i');
+    inspectIcon.className = 'bi bi-chevron-down small text-secondary runtime-dependency-chevron';
+    inspectIcon.setAttribute('aria-hidden', 'true');
+    inspect.append(inspectLabel, inspectIcon);
+    label.append(inspect);
+    const count = document.createElement('td');
+    count.append(runtimeStatus(result.count.state, result.count.elapsedMs, result.count.detail));
+    const links = document.createElement('td');
+    links.append(runtimeStatus(result.links.state, result.links.elapsedMs, result.links.detail));
+    const extra = document.createElement('td');
+    if (result.extra) {
+      const title = document.createElement('div');
+      title.className = 'small text-secondary mb-1';
+      title.textContent = result.extra.label;
+      extra.append(title, runtimeStatus(result.extra.state, result.extra.elapsedMs, result.extra.detail));
+    } else {
+      extra.className = 'small text-secondary';
+      extra.textContent = 'Not applicable';
+    }
+    row.append(label, count, links, extra);
+    tbody.append(row);
+    const dependencyRow = document.createElement('tr');
+    dependencyRow.className = 'runtime-dependency-row';
+    const dependencyCell = document.createElement('td');
+    dependencyCell.colSpan = 4;
+    dependencyCell.className = 'p-0 border-0';
+    const collapse = document.createElement('div');
+    collapse.className = 'collapse';
+    collapse.id = `runtime-dependencies-${result.kind}`;
+    const dependencyFlow = document.createElement('div');
+    dependencyFlow.className = 'runtime-dependency-flow d-grid gap-2 bg-light-subtle border-bottom px-3 py-3';
+    result.dependencies.forEach((dependency, index) => {
+      const step = document.createElement('div');
+      step.className = 'runtime-dependency-step position-relative border rounded-3 bg-body p-3';
+      step.dataset.runtimeState = dependency.state;
+      const stepNumber = document.createElement('div');
+      stepNumber.className = 'small text-secondary mb-2';
+      stepNumber.textContent = `Step ${index + 1}`;
+      const stepTitle = document.createElement('div');
+      stepTitle.className = 'small fw-semibold mb-2';
+      stepTitle.textContent = dependency.label;
+      const stepStatus = runtimeStatus(dependency.state, dependency.elapsedMs, dependency.detail);
+      const stepDetail = document.createElement('div');
+      stepDetail.className = 'small text-secondary mt-2';
+      stepDetail.textContent = dependency.detail;
+      step.append(stepNumber, stepTitle, stepStatus, stepDetail);
+      dependencyFlow.append(step);
+    });
+    collapse.append(dependencyFlow);
+    dependencyCell.append(collapse);
+    dependencyRow.append(dependencyCell);
+    tbody.append(dependencyRow);
+  });
+  table.append(thead, tbody);
+  categories.append(table);
+  if (!events.length) {
+    const empty = document.createElement('div');
+    empty.className = 'text-secondary small';
+    empty.textContent = 'No runtime data yet.';
+    eventLog.append(empty);
+    return;
+  }
+  events.forEach((event) => {
+    const row = document.createElement('div');
+    row.className = 'd-flex align-items-start justify-content-between gap-3 border-bottom pb-2';
+    const text = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'small fw-semibold';
+    title.textContent = event.label;
+    const detail = document.createElement('div');
+    detail.className = 'small text-secondary mt-1';
+    detail.textContent = event.detail;
+    text.append(title);
+    if (event.detail) text.append(detail);
+    const time = document.createElement('time');
+    time.className = 'small text-secondary text-nowrap';
+    time.textContent = runtimeTime(event.elapsedMs);
+    row.append(text, time);
+    eventLog.append(row);
+  });
+}
+function renderAnnotationSourceScope() {
+  const summary = el('#annotationSourceScopeSummary');
+  const list = el('#annotationSourceScopeList');
+  const combined = el('#annotationCombinedReferenceText');
+  summary.replaceChildren();
+  list.replaceChildren();
+  combined.textContent = '';
+  const pages = state.raw?.pages || [];
+  const rawBlocks = pages.flatMap((page, pageIndex) => (page.blocks || []).map((block, blockIndex) => ({
+    pageIndex,
+    blockIndex,
+    id: `ocr-block-${pageIndex}-${blockIndex}`,
+    type: String(block?.type || 'text'),
+    content: String(block?.content || '')
+  })));
+  const rawBlockById = new Map(rawBlocks.map((block) => [block.id, block]));
+  const referenceBlocks = rawBlocks.filter((block) => (
+    String(block?.type || '').toLowerCase() === 'references'
+  ));
+  if (!pages.length) {
+    const empty = document.createElement('div');
+    empty.className = 'alert alert-light border small mb-0';
+    empty.textContent = 'Open a manuscript to inspect its raw OCR source scope.';
+    summary.append(empty);
+    return;
+  }
+
+  const sourcePageIndex = (item = {}) => {
+    const pageId = /^ocr-page-(\d+)$/.exec(String(item?.source?.ocr_page_id || ''));
+    if (pageId) return Number(pageId[1]);
+    if (Number.isInteger(item?.source?.ocr_page_index)) return item.source.ocr_page_index;
+    if (Number.isInteger(item?.source?.page_number)) return Math.max(0, item.source.page_number - 1);
+    return Number.MAX_SAFE_INTEGER;
+  };
+  const sourceBlockId = (item = {}) => {
+    if (item?.source?.ocr_block_id) return String(item.source.ocr_block_id);
+    if (typeof item === 'string') return String(item).split(' :: ')[0];
+    return '';
+  };
+  const sourceLabel = (item = {}) => (
+    item.text
+    || item.heading
+    || item.label
+    || item.source?.exact_quote
+    || sourceBlockId(item)
+    || 'Returned source'
+  );
+  const scopeItem = (item, fallbackPage = Number.MAX_SAFE_INTEGER) => {
+    const blockId = sourceBlockId(item);
+    const block = rawBlockById.get(blockId);
+    const pageIndex = sourcePageIndex(item);
+    return {
+      pageIndex: Number.isFinite(pageIndex) && pageIndex !== Number.MAX_SAFE_INTEGER ? pageIndex : (block?.pageIndex ?? fallbackPage),
+      blockId,
+      label: sourceLabel(item),
+      content: block?.content || item?.source?.exact_quote || ''
+    };
+  };
+  const blockKeyItem = (key) => {
+    const blockId = sourceBlockId(key);
+    const block = rawBlockById.get(blockId);
+    return {
+      pageIndex: block?.pageIndex ?? Number.MAX_SAFE_INTEGER,
+      blockId,
+      label: blockId || String(key),
+      content: block?.content || String(key)
+    };
+  };
+  const front = state.annotations['front-matter'] || {};
+  const body = state.annotations.body || {};
+  const titleItems = front.title?.source ? [front.title] : (front.titles || []);
+  const abstractItems = front.abstract?.source ? [front.abstract] : [];
+  const articleItems = [
+    ...(body.sections || []).map((item) => scopeItem(item)),
+    ...(body.prose_blocks || []).map(blockKeyItem)
+  ];
+  const scopes = [
+    { key: 'title', label: 'Title', items: titleItems.map((item) => scopeItem(item)) },
+    { key: 'authors', label: 'Authors', items: (front.authors || []).map((item) => scopeItem(item)) },
+    { key: 'affiliations', label: 'Affiliations', items: (front.affiliations || []).map((item) => scopeItem(item)) },
+    { key: 'abstract', label: 'Abstract', items: abstractItems.map((item) => scopeItem(item)).concat((front.abstract?.prose_blocks || []).map(blockKeyItem)) },
+    { key: 'keywords', label: 'Keywords', items: (front.keywords || []).map((item) => scopeItem(item)) },
+    { key: 'article', label: 'Article body', items: articleItems },
+    { key: 'tables', label: 'Tables', items: (body.display_items || []).filter((item) => item.kind === 'table').map((item) => scopeItem(item)) },
+    { key: 'figures', label: 'Figures', items: (body.display_items || []).filter((item) => item.kind === 'figure').map((item) => scopeItem(item)) },
+    {
+      key: 'references',
+      label: 'References',
+      items: referenceBlocks.map((block) => ({
+        pageIndex: block.pageIndex,
+        blockId: block.id,
+        label: `${block.type} block`,
+        content: block.content
+      }))
+    }
+  ];
+
+  const coveredPages = [...new Set(scopes.flatMap((scope) => scope.items.map((item) => item.pageIndex)).filter(Number.isFinite))];
+  const returnedBlockIds = new Set((state.annotations.references?.references || []).map((entry) => entry.source?.ocr_block_id).filter(Boolean));
+  const alert = document.createElement('div');
+  alert.className = 'alert alert-light border small';
+  const primary = document.createElement('div');
+  primary.className = 'fw-semibold text-body';
+  primary.textContent = `${scopes.length} source scope${scopes.length === 1 ? '' : 's'} identified across ${coveredPages.length} of ${pages.length} OCR pages.`;
+  const detail = document.createElement('div');
+  detail.className = 'text-secondary mt-1';
+  detail.textContent = referenceBlocks.length
+    ? `${referenceBlocks.length} raw OCR reference block${referenceBlocks.length === 1 ? '' : 's'} form the bounded reference-only annotation request.`
+    : 'Raw OCR did not return a references block for this manuscript.';
+  alert.append(primary, detail);
+  summary.append(alert);
+
+  scopes.forEach((scope, scopeIndex) => {
+    const item = document.createElement('div');
+    item.className = 'accordion-item';
+    item.dataset.sourceScope = scope.key;
+    const heading = document.createElement('h4');
+    heading.className = 'accordion-header';
+    const button = document.createElement('button');
+    const collapseId = `annotationSourceScope${scopeIndex}`;
+    button.type = 'button';
+    button.className = 'accordion-button collapsed py-2';
+    button.dataset.bsToggle = 'collapse';
+    button.dataset.bsTarget = `#${collapseId}`;
+    button.setAttribute('aria-expanded', 'false');
+    button.setAttribute('aria-controls', collapseId);
+    const label = document.createElement('span');
+    label.className = 'd-flex flex-wrap align-items-center gap-2 w-100';
+    const name = document.createElement('span');
+    name.className = 'small fw-semibold';
+    name.textContent = scope.label;
+    const page = document.createElement('span');
+    page.className = 'small text-secondary';
+    const scopePages = [...new Set(scope.items.map((entry) => entry.pageIndex).filter(Number.isFinite))];
+    page.textContent = scopePages.length === 0
+      ? 'Not returned'
+      : scopePages.length === 1
+      ? `Page ${scopePages[0] + 1}`
+      : `Pages ${scopePages.map((pageIndex) => pageIndex + 1).join(', ')}`;
+    const count = document.createElement('span');
+    count.className = 'badge text-bg-light border fw-normal ms-auto me-2';
+    count.textContent = `${scope.items.length} source${scope.items.length === 1 ? '' : 's'}`;
+    label.append(name, page, count);
+    button.append(label);
+    heading.append(button);
+    const collapse = document.createElement('div');
+    collapse.id = collapseId;
+    collapse.className = 'accordion-collapse collapse';
+    const body = document.createElement('div');
+    body.className = 'accordion-body p-0';
+    const sources = document.createElement('div');
+    sources.className = 'list-group list-group-flush';
+    if (!scope.items.length) {
+      const unavailable = document.createElement('div');
+      unavailable.className = 'list-group-item px-3 py-3 small text-secondary';
+      unavailable.textContent = 'No source anchors were returned for this scope.';
+      sources.append(unavailable);
+    }
+    scope.items.forEach((entry) => {
+      const sourceRow = document.createElement('div');
+      sourceRow.className = 'list-group-item px-3 py-2';
+      const meta = document.createElement('div');
+      meta.className = 'd-flex flex-wrap align-items-center gap-2 mb-1';
+      const sourcePage = document.createElement('span');
+      sourcePage.className = 'small fw-semibold';
+      sourcePage.textContent = Number.isFinite(entry.pageIndex) ? `OCR page ${entry.pageIndex + 1}` : 'Page unavailable';
+      meta.append(sourcePage);
+      if (entry.blockId) {
+        const id = document.createElement('code');
+        id.className = 'small text-secondary';
+        id.textContent = entry.blockId;
+        meta.append(id);
+      }
+      if (scope.key === 'references') {
+        const status = document.createElement('span');
+        status.className = `badge fw-normal ms-auto ${returnedBlockIds.has(entry.blockId) ? 'text-bg-success' : 'text-bg-light border'}`;
+        status.textContent = returnedBlockIds.has(entry.blockId) ? 'Returned by annotation' : 'Selected by OCR';
+        meta.append(status);
+      }
+      const text = document.createElement('div');
+      text.className = 'small text-body text-break';
+      text.textContent = entry.label;
+      sourceRow.append(meta, text);
+      if (scope.key === 'references' && entry.content) {
+        const raw = document.createElement('pre');
+        raw.className = 'developer-contract-code border rounded-2 mt-2 mb-0';
+        raw.textContent = entry.content;
+        sourceRow.append(raw);
+      }
+      sources.append(sourceRow);
+    });
+    body.append(sources);
+    collapse.append(body);
+    item.append(heading, collapse);
+    list.append(item);
+  });
+  combined.textContent = referenceBlocks.length
+    ? referenceBlocks.map((block) => `[${block.id} · OCR page ${block.pageIndex + 1}]\n${block.content}`).join('\n\n')
+    : 'No raw OCR references blocks were selected.';
+}
+function renderCitationGroundingAudit() {
+  const metrics = el('#citationGroundingAuditMetrics');
+  const container = el('#citationGroundingAudit');
+  metrics.replaceChildren();
+  container.replaceChildren();
+  const ranges = state.citationExtraction?.ranges || [];
+  const totals = ranges.reduce((summary, range) => ({
+    returned: summary.returned + range.returned,
+    accepted: summary.accepted + range.accepted,
+    rejected: summary.rejected + range.rejected
+  }), { returned: 0, accepted: 0, rejected: 0 });
+  [
+    ['Returned', totals.returned],
+    ['Accepted', totals.accepted],
+    ['Rejected', totals.rejected]
+  ].forEach(([label, value]) => {
+    const metric = document.createElement('div');
+    metric.className = 'border rounded-3 bg-body px-3 py-2 text-end';
+    const count = document.createElement('div');
+    count.className = 'small fw-semibold';
+    count.textContent = String(value);
+    const caption = document.createElement('div');
+    caption.className = 'small text-secondary';
+    caption.textContent = label;
+    metric.append(count, caption);
+    metrics.append(metric);
+  });
+  if (!ranges.length) {
+    const empty = document.createElement('div');
+    empty.className = 'alert alert-light border small mb-0';
+    empty.textContent = 'No focused body-citation extraction ranges are available for this review.';
+    container.append(empty);
+    return;
+  }
+  const reasonLabels = {
+    label_not_in_context: 'The exact context quote does not contain the returned citation label',
+    context_not_unique_in_raw_ocr: 'The exact context quote could not be bound uniquely to raw OCR',
+    request_unavailable: 'The focused annotation request was unavailable'
+  };
+  ranges.forEach((range, rangeIndex) => {
+    const rangeItem = document.createElement('div');
+    rangeItem.className = 'accordion-item';
+    rangeItem.dataset.citationAuditRange = range.id;
+    const rangeHeading = document.createElement('h4');
+    rangeHeading.className = 'accordion-header';
+    const rangeButton = document.createElement('button');
+    rangeButton.className = 'accordion-button collapsed py-2';
+    rangeButton.type = 'button';
+    const rangeCollapseId = `citation-audit-range-${rangeIndex}`;
+    rangeButton.dataset.bsToggle = 'collapse';
+    rangeButton.dataset.bsTarget = `#${rangeCollapseId}`;
+    rangeButton.setAttribute('aria-expanded', 'false');
+    rangeButton.setAttribute('aria-controls', rangeCollapseId);
+    const rangeLabel = document.createElement('span');
+    rangeLabel.className = 'd-flex flex-wrap align-items-center gap-2 w-100';
+    const rangeName = document.createElement('span');
+    rangeName.className = 'small fw-semibold';
+    rangeName.textContent = range.pages.length
+      ? `Pages ${range.pages[0] + 1}–${range.pages.at(-1) + 1}`
+      : `Body citation range ${rangeIndex + 1}`;
+    const returned = document.createElement('span');
+    returned.className = 'small text-secondary';
+    returned.textContent = `${range.returned} returned`;
+    const accepted = document.createElement('span');
+    accepted.className = 'badge bg-success-subtle text-success-emphasis fw-normal';
+    accepted.textContent = `${range.accepted} accepted`;
+    const rejected = document.createElement('span');
+    rejected.className = `badge fw-normal me-2 ${range.rejected ? 'bg-warning-subtle text-warning-emphasis' : 'text-bg-light border'}`;
+    rejected.textContent = `${range.rejected} rejected`;
+    rangeLabel.append(rangeName, returned, accepted, rejected);
+    rangeButton.append(rangeLabel);
+    rangeHeading.append(rangeButton);
+    const rangeCollapse = document.createElement('div');
+    rangeCollapse.id = rangeCollapseId;
+    rangeCollapse.className = 'accordion-collapse collapse';
+    const rangeBody = document.createElement('div');
+    rangeBody.className = 'accordion-body bg-light-subtle';
+    const reasons = Object.entries(range.reasonCounts);
+    if (reasons.length) {
+      const reasonSummary = document.createElement('div');
+      reasonSummary.className = 'alert alert-warning py-2 px-3 small mb-3';
+      reasons.forEach(([reason, count], index) => {
+        if (index) reasonSummary.append(document.createElement('br'));
+        reasonSummary.append(`${count} × ${reasonLabels[reason] || reason}`);
+      });
+      rangeBody.append(reasonSummary);
+    }
+    if (range.failureMessage) {
+      const failure = document.createElement('div');
+      failure.className = 'small text-secondary mb-3';
+      failure.textContent = range.failureMessage;
+      rangeBody.append(failure);
+    }
+    if (!range.items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'small text-secondary';
+      empty.textContent = 'Mistral returned no body citation groups for this focused range.';
+      rangeBody.append(empty);
+    } else {
+      const citations = document.createElement('div');
+      citations.className = 'accordion';
+      citations.id = `citation-audit-items-${rangeIndex}`;
+      range.items.forEach((item, itemIndex) => {
+        const citation = document.createElement('div');
+        citation.className = 'accordion-item';
+        const heading = document.createElement('h5');
+        heading.className = 'accordion-header';
+        const button = document.createElement('button');
+        button.className = 'accordion-button collapsed py-2';
+        button.type = 'button';
+        const citationCollapseId = `citation-audit-${rangeIndex}-${itemIndex}`;
+        button.dataset.bsToggle = 'collapse';
+        button.dataset.bsTarget = `#${citationCollapseId}`;
+        button.setAttribute('aria-expanded', 'false');
+        button.setAttribute('aria-controls', citationCollapseId);
+        const buttonContent = document.createElement('span');
+        buttonContent.className = 'd-flex flex-wrap align-items-center gap-2 w-100 min-w-0';
+        const citationLabel = document.createElement('span');
+        citationLabel.className = 'small text-truncate';
+        citationLabel.textContent = item.label || item.itemExactQuote || `Citation ${itemIndex + 1}`;
+        const source = document.createElement('code');
+        source.className = 'small text-secondary';
+        source.textContent = [item.pageId, item.blockId].filter(Boolean).join(' · ') || 'Source unavailable';
+        const status = document.createElement('span');
+        status.className = `badge fw-normal ms-auto me-2 ${item.accepted ? 'bg-success-subtle text-success-emphasis' : 'bg-warning-subtle text-warning-emphasis'}`;
+        status.textContent = item.accepted ? 'Accepted' : 'Rejected';
+        buttonContent.append(citationLabel, source, status);
+        button.append(buttonContent);
+        heading.append(button);
+        const itemCollapse = document.createElement('div');
+        itemCollapse.id = citationCollapseId;
+        itemCollapse.className = 'accordion-collapse collapse';
+        const itemBody = document.createElement('div');
+        itemBody.className = 'accordion-body small';
+        [
+          ['label', item.label],
+          ['context_quote', item.contextQuote],
+          ['Declared source', [item.pageId, item.blockId].filter(Boolean).join(' · ')]
+        ].forEach(([label, value]) => {
+          const field = document.createElement('div');
+          field.className = 'mb-2';
+          const fieldLabel = document.createElement('code');
+          fieldLabel.className = 'd-block small text-secondary mb-1';
+          fieldLabel.textContent = label;
+          const fieldValue = document.createElement('div');
+          fieldValue.className = 'text-break';
+          fieldValue.textContent = value || 'Not returned';
+          field.append(fieldLabel, fieldValue);
+          itemBody.append(field);
+        });
+        if (item.reasons.length) {
+          const issueList = document.createElement('ul');
+          issueList.className = 'mb-0 ps-3 text-warning-emphasis';
+          item.reasons.forEach((reason) => {
+            const issue = document.createElement('li');
+            issue.textContent = reasonLabels[reason] || reason;
+            issueList.append(issue);
+          });
+          itemBody.append(issueList);
+        }
+        itemCollapse.append(itemBody);
+        citation.append(heading, itemCollapse);
+        citations.append(citation);
+      });
+      rangeBody.append(citations);
+    }
+    rangeCollapse.append(rangeBody);
+    rangeItem.append(rangeHeading, rangeCollapse);
+    container.append(rangeItem);
+  });
+}
+function renderFocusedCitationContract() {
+  el('#citationAnnotationFormatCode').textContent = JSON.stringify(citationAnnotationFormat, null, 2);
+  const list = el('#citationAnnotationPromptInstructions');
+  list.replaceChildren();
+  citationAnnotationPromptInstructions.forEach((instruction) => {
+    const item = document.createElement('li');
+    item.className = 'mb-2';
+    item.textContent = instruction;
+    list.append(item);
+  });
+}
+function renderDeveloperDiagnosticsContext() {
+  el('#developerDiagnosticsOrigin').textContent = window.location.origin;
+  el('#developerDiagnosticsTime').textContent = `Opened ${new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short'
+  }).format(new Date())}`;
+}
+function renderDocumentQnaDiagnostics() {
+  const container = el('#documentQnaOverview');
+  container.replaceChildren();
+  const sections = [
+    { label: 'Reference relations', value: state.documentQna?.references },
+    { label: 'Table and figure relations', value: state.documentQna?.displays }
+  ];
+  sections.forEach(({ label, value }) => {
+    const card = document.createElement('section');
+    card.className = 'border rounded-3 bg-body p-3';
+    const heading = document.createElement('div');
+    heading.className = 'd-flex align-items-center justify-content-between gap-3 mb-2';
+    const title = document.createElement('h4');
+    title.className = 'h6 mb-0';
+    title.textContent = label;
+    const status = document.createElement('span');
+    status.className = `badge fw-normal ${value?.status === 'ready' ? 'bg-success-subtle text-success-emphasis' : value?.status === 'unavailable' ? 'bg-warning-subtle text-warning-emphasis' : 'text-bg-light border'}`;
+    status.textContent = value?.status === 'ready' ? 'Ready' : value?.status === 'unavailable' ? 'Unavailable' : 'Not recorded';
+    heading.append(title, status);
+    card.append(heading);
+    if (value?.inputs) {
+      const inputs = document.createElement('div');
+      inputs.className = 'small text-secondary mb-2';
+      inputs.textContent = Object.entries(value.inputs).map(([key, count]) => `${key}: ${count}`).join(' · ');
+      card.append(inputs);
+    }
+    if (value?.links) {
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.className = 'small fw-semibold';
+      summary.textContent = 'View returned mappings';
+      const raw = document.createElement('pre');
+      raw.className = 'developer-contract-code border rounded-2 mt-2 mb-0';
+      raw.textContent = JSON.stringify(value.links, null, 2);
+      details.append(summary, raw);
+      card.append(details);
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'small text-secondary';
+      empty.textContent = value?.message || 'No Document QnA response was recorded for this review.';
+      card.append(empty);
+    }
+    container.append(card);
+  });
+}
 function setMode(mode) { const pdf = mode === 'pdf'; pdfPane.classList.toggle('d-none', !pdf); htmlPane.classList.toggle('d-none', pdf); pdfMode.classList.toggle('active', pdf); htmlMode.classList.toggle('active', !pdf); if (state.search.matches.length) requestAnimationFrame(() => showSearchMatch()); }
-function setCount(kind, value = '—', loading = false) { const tile = el(`[data-count="${kind}"]`); if (!tile) return; tile.classList.toggle('is-loading', loading); tile.querySelector('strong').textContent = value; }
-function showProgress() { toc.replaceChildren(); const progress = document.createElement('div'); progress.className = 'empty-note px-2 py-3'; progress.textContent = 'Reading document structure...'; toc.append(progress); document.querySelectorAll('[data-count]').forEach((tile) => setCount(tile.dataset.count, 'Counting', true)); note.textContent = 'Reading the manuscript source.'; }
+function setCount(kind, value = '—', loading = false) {
+  const tile = el(`[data-count="${kind}"]`);
+  if (!tile) return;
+  const valueNode = tile.querySelector('strong');
+  const previous = valueNode?.textContent || '';
+  tile.classList.toggle('is-loading', loading);
+  if (valueNode) valueNode.textContent = value;
+  const readyValue = !loading && value !== 'Counting' && value !== '—' && value !== '-';
+  if (readyValue && previous !== value) {
+    tile.classList.remove('count-value-revealed');
+    void tile.offsetWidth;
+    tile.classList.add('count-value-revealed');
+    window.setTimeout(() => tile.classList.remove('count-value-revealed'), 900);
+  }
+}
+function setTileProgress(kind, value = 0, label = '') { const tile = el(`[data-count="${kind}"]`); if (!tile) return; const progress = Math.max(0, Math.min(100, Number(value) || 0)); tile.style.setProperty('--tile-progress', `${progress}%`); tile.classList.toggle('is-enriching', progress > 0 && progress < 100); tile.dataset.progressLabel = label; }
+function setTocPending(message = 'Preparing the table of contents...') {
+  const pending = document.createElement('div');
+  pending.className = 'toc-pending d-flex align-items-center gap-2 px-2 py-2 small text-secondary';
+  pending.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>';
+  const label = document.createElement('span');
+  label.textContent = message;
+  pending.append(label);
+  toc.replaceChildren(pending);
+}
+function showProgress() { document.querySelectorAll('[data-count]').forEach((tile) => { setCategoryState(tile.dataset.count, 'extracting'); setCount(tile.dataset.count, 'Counting', true); setTileProgress(tile.dataset.count, 0, 'Counting'); }); setTocPending(); note.textContent = 'Preparing the manuscript reader.'; }
+function settlePendingCounts() {
+  document.querySelectorAll('[data-count].is-loading').forEach((tile) => {
+    const kind = tile.dataset.count;
+    const pass = detailPass(kind);
+    if (pass && state.annotationStatus[pass] === 'pending') return;
+    if (pass && state.annotationStatus[pass] === 'unavailable') {
+      setCategoryState(kind, 'unavailable');
+      setCount(kind, '—', false);
+      setTileProgress(kind, 0, 'Unavailable');
+      return;
+    }
+    const items = sourceItems(kind);
+    const value = items.length ? String(items.length) : '—';
+    setCategoryState(kind, items.length ? 'counted' : 'unavailable');
+    setCount(kind, value, false);
+    setTileProgress(kind, items.length ? 72 : 0, items.length ? 'Partially ready' : 'Unavailable');
+  });
+  refreshOpenDetails(['authors', 'affiliations', 'abstract', 'article', 'keywords', 'references', 'tables', 'figures']);
+}
 function sourcePage(item = {}) { return Number(item?.source?.page_number || 0); }
 function resolveSource(item = {}) {
   const declared = validateDeclaredSource(state.raw?.pages || [], item);
   if (!declared) return null;
-  const rendered = renderMarkdown(state.raw.pages[declared.pageNumber - 1].markdown || state.raw.pages[declared.pageNumber - 1].content || '');
-  const highlightQuote = markdownLabel(declared.quote);
-  return { ...declared, highlightQuote, canHighlight: Boolean(highlightQuote) && plain(rendered).includes(highlightQuote) };
+  const page = state.raw.pages[declared.pageNumber - 1];
+  const rendered = renderMarkdown(page.markdown || page.content || '');
+  const sourceBlock = Number.isInteger(declared.blockIndex) ? page.blocks?.[declared.blockIndex] : null;
+  const anchorQuote = markdownLabel(sourceBlock?.content || declared.quote);
+  const itemQuote = markdownLabel(item?.item_exact_quote || item?.source?.item_exact_quote || item?.text || item?.label || declared.quote);
+  const renderedText = plain(rendered);
+  return {
+    ...declared,
+    anchorQuote,
+    itemQuote,
+    canHighlight: Boolean(itemQuote) && renderedText.includes(itemQuote)
+  };
 }
 function sourceIsUsable(item = {}) { return Boolean(resolveSource(item)); }
-function labelFor(kind) { return ({ authors: 'Authors', affiliations: 'Affiliations', abstract: 'Abstract', article: 'Article', keywords: 'Keywords', references: 'References', tables: 'Tables', figures: 'Figures' })[kind] || kind; }
+function labelFor(kind) { return categoryLabels[kind] || kind; }
 function countUnit(kind, value) { const forms = { authors: ['author', 'authors'], affiliations: ['affiliation', 'affiliations'], abstract: ['word', 'words'], article: ['word', 'words'], keywords: ['keyword', 'keywords'], references: ['reference', 'references'], tables: ['table', 'tables'], figures: ['figure', 'figures'] }; const [singular, plural] = forms[kind] || ['item', 'items']; return Number(value) === 1 ? singular : plural; }
 function recordCountReady(kind, value) { recordRuntime(`${labelFor(kind)} count ready`, `${value} ${countUnit(kind, value)} returned.`, `count:${kind}`); }
 function recordSourceLinksReady(kind) { const items = sourceItems(kind); const confirmed = items.filter(sourceIsUsable).length; const detail = items.length ? `${confirmed}/${items.length} exact HTML source links confirmed.` : 'No source-linked items were returned.'; recordRuntime(`${labelFor(kind)} source links ready`, detail, `links:${kind}`); }
+function categoryState(kind) { return state.categoryStates?.[kind] || 'waiting'; }
+function categoryStateLabel(value) { return ({ waiting: 'waiting', extracting: 'extracting', counted: 'counted', linking: 'preparing source links', ready: 'ready', unavailable: 'unavailable' })[value] || value; }
+function applyCategoryTileState(kind) {
+  const tile = el(`[data-count="${kind}"]`);
+  if (!tile) return;
+  tile.dataset.categoryState = categoryState(kind);
+  if (['tables', 'figures', 'references'].includes(kind)) tile.dataset.linkState = sourceLinkStatus(kind);
+}
+function setCategoryState(kind, next, detail = '') {
+  if (!categoryKinds.includes(kind)) return;
+  if (!state.categoryStates) state.categoryStates = initialCategoryStates();
+  const previous = state.categoryStates[kind] || 'waiting';
+  state.categoryStates[kind] = next;
+  applyCategoryTileState(kind);
+  if (previous !== next && !state.preservingRuntimeSnapshot) {
+    recordRuntime(`${labelFor(kind)} ${categoryStateLabel(next)}`, detail, `state:${kind}:${next}`);
+  }
+}
+function sourceLinkStatus(kind) { return kind === 'references' ? state.referenceLinksStatus : (state.sourceLinksByKind?.[kind] || state.sourceLinksStatus || 'idle'); }
+function setSourceLinkStatus(kinds, status) {
+  kinds.forEach((kind) => { state.sourceLinksByKind[kind] = status; applyCategoryTileState(kind); });
+  const statuses = Object.values(state.sourceLinksByKind);
+  state.sourceLinksStatus = statuses.every((value) => value === 'ready') ? 'ready'
+    : statuses.some((value) => value === 'pending') ? 'pending'
+      : statuses.every((value) => value === 'idle') ? 'idle'
+        : 'unavailable';
+}
 function announceHtmlReady() { htmlMode.classList.remove('is-html-ready'); void htmlMode.offsetWidth; htmlMode.classList.add('is-html-ready'); }
 function appendMarkdown(content, value = '') { renderMarkdown(value).split(/\n{2,}/).filter(Boolean).forEach((block) => { const heading = /^(#{1,6})\s+([\s\S]+)$/.exec(block.trim()); const node = document.createElement(heading ? `h${Math.min(6, heading[1].length + 1)}` : 'p'); node.className = heading ? 'ocr-markdown-heading' : 'ocr-markdown-paragraph'; node.innerHTML = inlineMarkdown(heading ? heading[2] : block); content.append(node); }); }
 function safeTable(tableHtml = '') { const allowed = new Set(['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD', 'B', 'STRONG', 'I', 'EM', 'SUB', 'SUP', 'BR']); const source = new DOMParser().parseFromString(tableHtml, 'text/html').querySelector('table'); if (!source) return null; const copy = (node) => { if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.nodeValue); if (!allowed.has(node.nodeName)) return document.createDocumentFragment(); const clone = document.createElement(node.nodeName.toLowerCase()); if (['TD', 'TH'].includes(node.nodeName)) ['colspan', 'rowspan'].forEach((name) => { const value = Number(node.getAttribute(name)); if (Number.isInteger(value) && value > 0) clone.setAttribute(name, String(value)); }); node.childNodes.forEach((child) => clone.append(copy(child))); return clone; }; return copy(source); }
-function appendTables(content, tables = []) { tables.forEach((table, index) => { const wrapper = document.createElement('div'); wrapper.className = 'ocr-table-wrap'; const label = document.createElement('div'); label.className = 'ocr-display-label'; label.textContent = `Table ${index + 1}`; const responsive = document.createElement('div'); responsive.className = 'table-responsive'; const rendered = safeTable(table.content); if (!rendered) return; rendered.classList.add('table', 'table-sm', 'align-middle', 'mb-0'); responsive.append(rendered); wrapper.append(label, responsive); content.append(wrapper); }); }
+function appendTableObject(content, table) {
+  const rendered = safeTable(table?.content || '');
+  if (!rendered) return false;
+  const wrapper = document.createElement('div');
+  wrapper.className = 'ocr-table-wrap';
+  const responsive = document.createElement('div');
+  responsive.className = 'table-responsive';
+  rendered.classList.add('table', 'table-sm', 'align-middle', 'mb-0');
+  responsive.append(rendered);
+  wrapper.append(responsive);
+  content.append(wrapper);
+  return true;
+}
+function appendTables(content, tables = []) { tables.forEach((table) => appendTableObject(content, table)); }
 async function renderFigureCrop(canvas, image, pageIndex, dimensions) { if (!state.pdf || !dimensions?.width || !dimensions?.height) return; const page = await state.pdf.getPage(pageIndex + 1); const viewport = page.getViewport({ scale: 1.3 }); const source = document.createElement('canvas'); source.width = Math.ceil(viewport.width); source.height = Math.ceil(viewport.height); await page.render({ canvasContext: source.getContext('2d', { alpha: false }), viewport }).promise; const scaleX = viewport.width / dimensions.width; const scaleY = viewport.height / dimensions.height; const x = Math.max(0, Math.floor(image.top_left_x * scaleX)); const y = Math.max(0, Math.floor(image.top_left_y * scaleY)); const width = Math.min(source.width - x, Math.ceil((image.bottom_right_x - image.top_left_x) * scaleX)); const height = Math.min(source.height - y, Math.ceil((image.bottom_right_y - image.top_left_y) * scaleY)); canvas.width = width; canvas.height = height; canvas.getContext('2d', { alpha: false }).drawImage(source, x, y, width, height, 0, 0, width, height); }
 function imageDataUrl(value = '') { const source = String(value).trim(); return source.startsWith('data:image/') ? source : `data:image/jpeg;base64,${source}`; }
-function appendFigures(content, images = [], pageIndex = 0, dimensions = null) { images.forEach((image, index) => { const figure = document.createElement('figure'); figure.className = 'ocr-figure'; const label = document.createElement('figcaption'); label.className = 'ocr-display-label'; label.textContent = `Figure ${index + 1}`; figure.append(label); if (image.image_base64) { const img = document.createElement('img'); img.className = 'img-fluid'; img.src = imageDataUrl(image.image_base64); img.alt = `Figure ${index + 1} from source page ${pageIndex + 1}`; figure.append(img); } else { const canvas = document.createElement('canvas'); canvas.className = 'ocr-figure-canvas'; canvas.setAttribute('aria-label', `Figure ${index + 1} from source page ${pageIndex + 1}`); figure.append(canvas); renderFigureCrop(canvas, image, pageIndex, dimensions).catch(() => { canvas.replaceWith(document.createTextNode('Figure preview unavailable.')); }); } content.append(figure); }); }
+function appendFigureObject(content, image, pageIndex = 0, dimensions = null) {
+  const figure = document.createElement('figure');
+  figure.className = 'ocr-figure';
+  if (image?.image_base64) {
+    const img = document.createElement('img');
+    img.className = 'img-fluid';
+    img.src = imageDataUrl(image.image_base64);
+    img.alt = `Figure from source page ${pageIndex + 1}`;
+    figure.append(img);
+  } else {
+    const canvas = document.createElement('canvas');
+    canvas.className = 'ocr-figure-canvas';
+    canvas.setAttribute('aria-label', `Figure from source page ${pageIndex + 1}`);
+    figure.append(canvas);
+    renderFigureCrop(canvas, image, pageIndex, dimensions).catch(() => { canvas.replaceWith(document.createTextNode('Figure preview unavailable.')); });
+  }
+  content.append(figure);
+  return true;
+}
+function appendFigures(content, images = [], pageIndex = 0, dimensions = null) { images.forEach((image) => appendFigureObject(content, image, pageIndex, dimensions)); }
+function appendMarkdownWithAssets(content, markdown = '', page = {}, pageIndex = 0) {
+  const tableById = new Map((page.tables || []).map((table) => [table.id || table.table_id, table]).filter(([id]) => id));
+  const imageById = new Map((page.images || []).map((image) => [image.id || image.image_id, image]).filter(([id]) => id));
+  const usedTables = new Set();
+  const usedImages = new Set();
+  const pattern = /!?\[[^\]]*\]\(((?:tbl|img)-\d+\.[^)]+)\)/g;
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(markdown))) {
+    appendMarkdown(content, markdown.slice(cursor, match.index));
+    const id = match[1];
+    if (tableById.has(id)) {
+      if (appendTableObject(content, tableById.get(id))) usedTables.add(id);
+    } else if (imageById.has(id)) {
+      if (appendFigureObject(content, imageById.get(id), pageIndex, page.dimensions)) usedImages.add(id);
+    }
+    cursor = pattern.lastIndex;
+  }
+  appendMarkdown(content, markdown.slice(cursor));
+  (page.tables || []).forEach((table) => { const id = table.id || table.table_id; if (!id || !usedTables.has(id)) appendTableObject(content, table); });
+  (page.images || []).forEach((image) => { const id = image.id || image.image_id; if (!id || !usedImages.has(id)) appendFigureObject(content, image, pageIndex, page.dimensions); });
+}
 function resolvedReferencesByPage() {
   const references = state.annotations.references?.references || [];
   if (!references.length) return new Map();
@@ -66,40 +820,732 @@ function appendAnnotatedReferences(content, references = [], pageHasReferenceHea
   if (!references.length) return;
   const list = document.createElement('ol'); list.className = 'ocr-reference-list'; list.start = Number(references[0].number || 1);
   if (!pageHasReferenceHeading) list.setAttribute('aria-label', 'References');
-  references.forEach((reference) => { const item = document.createElement('li'); item.dataset.referenceNumber = String(reference.number || ''); item.dataset.referenceText = plain(reference.text).replace(/\s+/g, ' ').trim(); item.textContent = reference.text; list.append(item); });
+  references.forEach((reference) => {
+    const item = document.createElement('li');
+    const printedNumber = Number(reference.number || 0);
+    if (printedNumber) item.value = printedNumber;
+    item.dataset.referenceNumber = String(reference.number || '');
+    item.dataset.referenceHandle = String(reference.link_handle || '');
+    item.dataset.referenceText = plain(reference.text).replace(/\s+/g, ' ').trim();
+    item.textContent = reference.text;
+    list.append(item);
+  });
   content.append(list);
 }
-function showHtml(pages = []) { const scroll = el('.html-scroll')?.scrollTop || 0; const referencesByPage = resolvedReferencesByPage(); htmlDocument.replaceChildren(); pages.forEach((page, index) => { const section = document.createElement('section'); section.className = 'ocr-page'; section.dataset.page = String(index + 1); const label = document.createElement('span'); label.className = 'ocr-page-label'; label.textContent = `Page ${index + 1}`; const content = document.createElement('div'); const pageNumber = index + 1; const annotatedReferences = referencesByPage.get(pageNumber) || []; const markdown = page.markdown || page.content || (page.blocks || []).map((block) => block.content || '').join('\n\n'); const referenceHeading = /(^#{1,6}\s+References\s*$)/im.exec(markdown); if (annotatedReferences.length && referenceHeading) appendMarkdown(content, markdown.slice(0, referenceHeading.index + referenceHeading[0].length)); else if (!annotatedReferences.length) appendMarkdown(content, markdown); appendTables(content, page.tables); appendFigures(content, page.images, index, page.dimensions); appendAnnotatedReferences(content, annotatedReferences, Boolean(referenceHeading)); section.append(label, content); htmlDocument.append(section); }); if (pages.length) { announceHtmlReady(); requestAnimationFrame(() => { const host = el('.html-scroll'); if (host) host.scrollTop = scroll; if (state.search.matches.length && !htmlPane.classList.contains('d-none')) showSearchMatch(); }); } }
+function showHtml(pages = []) { const scroll = el('.html-scroll')?.scrollTop || 0; const referencesByPage = resolvedReferencesByPage(); htmlDocument.replaceChildren(); pages.forEach((page, index) => { const section = document.createElement('section'); section.className = 'ocr-page'; section.dataset.page = String(index + 1); const label = document.createElement('span'); label.className = 'ocr-page-label'; label.textContent = `Page ${index + 1}`; const content = document.createElement('div'); const pageNumber = index + 1; const annotatedReferences = referencesByPage.get(pageNumber) || []; const markdown = page.markdown || page.content || (page.blocks || []).map((block) => block.content || '').join('\n\n'); const referenceHeading = /(^#{1,6}\s+References\s*$)/im.exec(markdown); if (annotatedReferences.length && referenceHeading) appendMarkdownWithAssets(content, markdown.slice(0, referenceHeading.index + referenceHeading[0].length), page, index); else if (!annotatedReferences.length) appendMarkdownWithAssets(content, markdown, page, index); appendAnnotatedReferences(content, annotatedReferences, Boolean(referenceHeading)); section.append(label, content); htmlDocument.append(section); }); if (pages.length) { announceHtmlReady(); requestAnimationFrame(() => { const host = el('.html-scroll'); if (host) host.scrollTop = scroll; if (state.search.matches.length && !htmlPane.classList.contains('d-none')) showSearchMatch(); }); } }
 function scrollPdfToPage(pageNumber, attempts = 0) { const target = el(`.pdf-page[data-page="${pageNumber}"]`); if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); target.classList.add('pdf-page-target'); window.setTimeout(() => target?.classList.remove('pdf-page-target'), 1400); return; } if (state.pdf && attempts < 20) { window.setTimeout(() => scrollPdfToPage(pageNumber, attempts + 1), 100); return; } setMode('html'); el(`.ocr-page[data-page="${pageNumber}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-function jumpToTocEntry(entry) { const pageNumber = sourcePage(entry); if (!pageNumber) return; if (!pdfPane.classList.contains('d-none')) { scrollPdfToPage(pageNumber); return; } const target = el(`.ocr-page[data-page="${pageNumber}"]`); clearSourceHighlight(); target?.scrollIntoView({ behavior: 'smooth', block: 'start' }); highlightExactQuote(target, entry.heading); }
-function showToc(entries = []) { toc.replaceChildren(); if (!entries.length) { toc.textContent = 'No section headings were returned.'; return; } entries.forEach((entry) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'toc-button'; button.style.paddingLeft = `${.45 + Math.max(0, Number(entry.level || 1) - 1) * .7}rem`; button.textContent = entry.tocLabel || entry.heading; button.addEventListener('click', () => jumpToTocEntry(entry)); toc.append(button); }); }
+function scrollHighlightedMark(mark) { mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }); }
+function jumpToTocEntry(entry) { const pageNumber = sourcePage(entry); if (!pageNumber) return; if (!pdfPane.classList.contains('d-none')) { scrollPdfToPage(pageNumber); return; } const target = el(`.ocr-page[data-page="${pageNumber}"]`); clearSourceHighlight(); const mark = highlightExactQuote(target, entry.heading); if (mark) scrollHighlightedMark(mark); else target?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+function showToc(entries = []) { toc.replaceChildren(); if (!entries.length) { const empty = document.createElement('div'); empty.className = 'empty-note px-2 py-3 small text-secondary'; empty.textContent = 'No section headings were returned for this manuscript.'; toc.append(empty); return; } entries.forEach((entry) => { const button = document.createElement('button'); button.type = 'button'; button.className = 'toc-button'; button.style.paddingLeft = `${.45 + Math.max(0, Number(entry.level || 1) - 1) * .7}rem`; button.textContent = entry.tocLabel || entry.heading; button.addEventListener('click', () => jumpToTocEntry(entry)); toc.append(button); }); }
 function labelFirstTitle(entries = []) { let labelled = false; return entries.map((entry) => { if (!entry.isTitle || labelled) return entry; labelled = true; return { ...entry, tocLabel: 'Title' }; }); }
 function rawBlockEntries(pages = [], types = []) { const entries = []; pages.forEach((page, pageIndex) => (page.blocks || []).forEach((block) => { const type = String(block.type || '').toLowerCase(); if (types.includes(type)) entries.push({ heading: headingLabel(block.content), isTitle: type === 'title', level: 1, source: { page_number: pageIndex + 1 } }); })); return labelFirstTitle(entries.filter((entry) => entry.heading)); }
 function rawMarkdownHeadingEntries(pages = []) { return labelFirstTitle(pages.flatMap((page, pageIndex) => String(page.markdown || '').split(/\r?\n/).flatMap((line) => { const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line); if (!match) return []; return [{ heading: match[2], isTitle: match[1].length === 1, level: match[1].length, source: { page_number: pageIndex + 1 } }]; }))); }
-function showRawOcr(raw = {}) { state.raw = raw; resetManuscriptSearch(); const pages = raw.pages || []; const typedEntries = rawBlockEntries(pages, ['title', 'heading']); const tocEntries = typedEntries.length ? typedEntries : rawMarkdownHeadingEntries(pages); const tableCount = pages.reduce((sum, page) => sum + (page.tables || []).length, 0); const figureCount = rawBlockEntries(pages, ['figure', 'image']).length; showHtml(pages); showToc(tocEntries); setCount('tables', String(tableCount)); setCount('figures', String(figureCount)); recordRuntime('Table of contents ready', `${tocEntries.length} OCR headings returned.`, 'toc'); recordCountReady('tables', tableCount); recordCountReady('figures', figureCount); note.textContent = 'OCR source is ready. Additional counts are being prepared.'; fileName.textContent = `${raw.fileName} · OCR source ready in ${(Number(raw.elapsedMs || 0) / 1000).toFixed(1)} s`; }
+function showRawOcr(raw = {}) { state.raw = raw; resetManuscriptSearch(); const pages = raw.pages || []; const typedEntries = rawBlockEntries(pages, ['title', 'heading']); const tocEntries = typedEntries.length ? typedEntries : rawMarkdownHeadingEntries(pages); const tableCount = pages.reduce((sum, page) => sum + (page.tables || []).length, 0); const figureCount = rawBlockEntries(pages, ['figure', 'image']).length; showHtml(pages); showToc(tocEntries); setCategoryState('tables', 'counted', 'Raw OCR table count is visible while source links are prepared.'); setCategoryState('figures', 'counted', 'Raw OCR figure count is visible while source links are prepared.'); setCount('tables', String(tableCount)); setCount('figures', String(figureCount)); setTileProgress('tables', 24, 'Preparing source links'); setTileProgress('figures', 24, 'Preparing source links'); recordRuntime('Table of contents ready', `${tocEntries.length} OCR headings returned.`, 'toc'); recordCountReady('tables', tableCount); recordCountReady('figures', figureCount); note.textContent = 'Reader ready. Additional counts and source links are being prepared.'; fileName.textContent = `${raw.fileName} · OCR source ready`; }
+function applyAnnotationOcrPages(pageIndexes = [], ocrPages = []) {
+  if (!state.raw?.pages?.length || !Array.isArray(pageIndexes) || !Array.isArray(ocrPages) || !ocrPages.length) return;
+  const replacements = ocrPages.length === state.raw.pages.length
+    ? pageIndexes.map((pageIndex) => ocrPages[pageIndex])
+    : pageIndexes.map((_pageIndex, offset) => ocrPages[offset]);
+  if (replacements.length !== pageIndexes.length || replacements.some((page) => !Array.isArray(page?.blocks))) return;
+  pageIndexes.forEach((pageIndex, offset) => { state.raw.pages[pageIndex] = replacements[offset]; });
+  showHtml(state.raw.pages);
+  recordRuntime('Annotation OCR source ready', `${pageIndexes.length} source-grounded OCR page${pageIndexes.length === 1 ? '' : 's'} refreshed.`, `annotation-ocr:${pageIndexes[0]}`);
+}
 function refreshOpenDetails(kinds = []) { if (kinds.includes(state.openDetailKind)) openDetails(state.openDetailKind); }
-function showFrontMatterCounts(annotation = {}) { state.annotations['front-matter'] = annotation; state.annotationStatus['front-matter'] = 'ready'; const values = [['authors', annotation.authors?.length || 0], ['affiliations', annotation.affiliations?.length || 0], ['abstract', annotation.abstract?.word_count || 0], ['keywords', annotation.keywords?.length || 0]]; values.forEach(([kind, value]) => { setCount(kind, String(value)); recordCountReady(kind, value); recordSourceLinksReady(kind); }); refreshOpenDetails(values.map(([kind]) => kind)); }
-function showBodyCounts(annotation = {}) { state.annotations.body = annotation; state.annotationStatus.body = 'ready'; const articleWords = (annotation.sections || []).reduce((sum, section) => sum + Number(section.word_count || 0), 0); const displayItems = annotation.display_items || []; const tableCount = displayItems.filter((item) => item.kind === 'table').length; const figureCount = displayItems.filter((item) => item.kind === 'figure').length; setCount('article', String(articleWords)); setCount('tables', String(tableCount)); setCount('figures', String(figureCount)); recordCountReady('article', articleWords); recordCountReady('tables', tableCount); recordCountReady('figures', figureCount); ['article', 'tables', 'figures'].forEach(recordSourceLinksReady); refreshOpenDetails(['article', 'tables', 'figures']); }
-function showReferenceCounts(annotation = {}) { state.annotations.references = annotation; state.annotationStatus.references = 'ready'; const count = annotation.references?.length || 0; setCount('references', String(count)); recordCountReady('references', count); recordSourceLinksReady('references'); showHtml(state.raw?.pages || []); refreshOpenDetails(['references']); }
-function request(path, payload) { return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }).then(async (response) => ({ response, result: await response.json() })); }
+function showFrontMatterCounts(annotation = {}, storedAuthorProfiles = null) {
+  state.annotations['front-matter'] = annotation;
+  state.annotationStatus['front-matter'] = 'ready';
+  const exactAbstract = wordCountProvenanceFromBlocks(state.raw?.pages || [], annotation.abstract?.prose_blocks || []);
+  if (exactAbstract.valid && annotation.abstract) {
+    annotation.abstract.word_count = exactAbstract.count;
+    annotation.abstract.word_count_provenance = exactAbstract;
+  }
+  const values = [['authors', annotation.authors?.length || 0], ['affiliations', annotation.affiliations?.length || 0], ['abstract', exactAbstract.valid ? exactAbstract.count : '—'], ['keywords', annotation.keywords?.length || 0]];
+  values.forEach(([kind, value]) => {
+    setCategoryState(kind, value === '—' ? 'unavailable' : 'counted');
+    setCount(kind, String(value));
+    setTileProgress(kind, kind === 'authors' ? 62 : 72, kind === 'authors' ? 'Preparing profiles' : 'Verifying source links');
+    if (Number.isInteger(value)) recordCountReady(kind, value);
+  });
+  refreshOpenDetails(values.map(([kind]) => kind));
+  if (Array.isArray(storedAuthorProfiles)) { state.authorProfiles = { status: 'ready', authors: storedAuthorProfiles }; setTileProgress('authors', 100, 'Ready'); if (!state.preservingRuntimeSnapshot) recordRuntime('Stored author profiles ready', `${storedAuthorProfiles.filter((profile) => profile?.status === 'found').length}/${annotation.authors?.length || 0} verified profiles loaded locally.`, 'author-profiles'); } else if (state.authorProfiles.status === 'idle') startAuthorProfileLookup(annotation.authors || []);
+}
+function showBodyCounts(annotation = {}) {
+  state.annotations.body = annotation;
+  const wordCount = wordCountProvenanceFromBlocks(state.raw?.pages || [], annotation.prose_blocks || []);
+  const articleWords = wordCount.valid ? wordCount.count : null;
+  if (wordCount.valid) annotation.word_count_provenance = wordCount;
+  if (state.annotationStatus.body !== 'ready') {
+    if (state.annotationStatus.body === 'unavailable') {
+      setCategoryState('article', 'unavailable');
+      setCount('article', '—', false);
+      setTileProgress('article', 0, 'Unavailable');
+      refreshOpenDetails(['article', 'tables', 'figures']);
+      return;
+    }
+    setCategoryState('article', 'extracting');
+    setCount('article', 'Counting', true);
+    setTileProgress('article', 48, 'Selecting article text');
+    refreshOpenDetails(['article', 'tables', 'figures']);
+    return;
+  }
+  setCategoryState('article', articleWords === null ? 'unavailable' : 'counted');
+  setCount('article', articleWords === null ? '—' : String(articleWords));
+  setTileProgress('article', articleWords === null ? 72 : 76, articleWords === null ? 'Article text unavailable' : 'Verifying source links');
+  if (articleWords !== null) recordCountReady('article', articleWords);
+  refreshOpenDetails(['article', 'tables', 'figures']);
+}
+function showReferenceCounts(annotation = {}) {
+  state.annotations.references = annotation;
+  const count = annotation.references?.length || 0;
+  const complete = state.annotationStatus.references === 'ready';
+  if (state.annotationStatus.references === 'unavailable') {
+    setCategoryState('references', 'unavailable');
+    setCount('references', '—', false);
+    setTileProgress('references', 0, 'Unavailable');
+    refreshOpenDetails(['references']);
+    return;
+  }
+  if (!complete) {
+    setCategoryState('references', 'extracting', count ? `${count} references returned so far; final coverage is still pending.` : 'Reading bibliography ranges.');
+    setCount('references', 'Counting', true);
+    setTileProgress('references', count ? 62 : 36, count ? 'Still counting' : 'Reading bibliography');
+    refreshOpenDetails(['references']);
+    return;
+  }
+  setCategoryState('references', 'counted', 'All annotation ranges completed before publishing the reference count.');
+  setCount('references', String(count));
+  setTileProgress('references', complete ? 76 : 62, 'Preparing source links');
+  recordCountReady('references', count);
+  showHtml(state.raw?.pages || []);
+  refreshOpenDetails(['references']);
+}
+async function runReferenceAnnotationStage(base64) {
+  const referenceBlocks = referenceBlocksFromRawPages(state.raw?.pages || []);
+  state.annotationStatus.references = 'pending';
+  setCategoryState('references', 'extracting', 'Separating the bibliography into individual references.');
+  setCount('references', 'Counting', true);
+  setTileProgress('references', 34, 'Reading bibliography');
+  refreshOpenDetails(['references']);
+  if (!referenceBlocks.length) throw new Error('Raw OCR did not return reference-list blocks.');
+  recordRuntime('Reference inventory started', `${referenceBlocks.length} OCR reference blocks sent in one bounded annotation request.`, 'reference-inventory:start');
+  const response = await request('/api/ocr/references', JSON.stringify({ base64, referenceBlocks }));
+  if (!response.response.ok) throw new Error(response.result?.error || 'Reference inventory was unavailable.');
+  const references = (response.result.references || []).map((item, index) => ({
+    link_handle: item.id,
+    text: item.text,
+    number: index + 1,
+    source: item.source,
+    body_occurrences: []
+  }));
+  state.annotations.references = { references };
+  state.annotationStatus.references = 'ready';
+  showReferenceCounts(state.annotations.references);
+  finishDirectSourceLinks();
+  recordRuntime('Reference inventory ready', `${references.length} individual references returned with exact HTML source anchors.`, 'reference-inventory:ready');
+}
+function request(path, payload) {
+  return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }).then(async (response) => {
+    const text = await response.text();
+    try {
+      return { response, result: text ? JSON.parse(text) : {} };
+    } catch {
+      return { response, result: { error: text.trim() || `Request failed (${response.status}).` } };
+    }
+  });
+}
+async function settled(promise) {
+  try { return { status: 'fulfilled', value: await promise }; }
+  catch (reason) { return { status: 'rejected', reason }; }
+}
 function closeDetails() { state.openDetailKind = ''; const panel = el('#detailsPanel'); panel.classList.remove('is-open'); panel.setAttribute('aria-hidden', 'true'); }
-function sourceItems(kind) { const front = state.annotations['front-matter'] || {}; const body = state.annotations.body || {}; const refs = state.annotations.references || {}; if (['authors', 'affiliations', 'keywords'].includes(kind)) return front[kind] || []; if (kind === 'abstract') return front.abstract?.text ? [front.abstract] : []; if (kind === 'article') return body.sections || []; if (kind === 'references') return refs.references || []; if (kind === 'tables' || kind === 'figures') return (body.display_items || []).filter((item) => item.kind === kind.slice(0, -1)); return []; }
-function detailText(item, kind) { if (kind === 'article') return item.heading ? `${item.heading}\n${item.text}` : item.text; if (kind === 'references') return item.text; if (kind === 'tables' || kind === 'figures') return item.label; return item.text; }
+function sourceItems(kind) { const front = state.annotations['front-matter'] || {}; const body = state.annotations.body || {}; const refs = state.annotations.references || {}; if (['authors', 'affiliations', 'keywords'].includes(kind)) return front[kind] || []; if (kind === 'abstract') return Array.isArray(front.abstract?.prose_blocks) ? [front.abstract] : []; if (kind === 'article') return body.sections || []; if (kind === 'references') return refs.references || []; if (kind === 'tables' || kind === 'figures') return (body.display_items || []).filter((item) => item.kind === kind.slice(0, -1)); return []; }
+function detailText(item, kind) { if (kind === 'article') return item.heading; if (kind === 'abstract') return `${item.word_count || 0} words`; if (kind === 'references') return item.text; if (kind === 'tables' || kind === 'figures') return item.label; return item.text; }
 function detailPass(kind) { if (['authors', 'affiliations', 'abstract', 'keywords'].includes(kind)) return 'front-matter'; if (['article', 'tables', 'figures'].includes(kind)) return 'body'; if (kind === 'references') return 'references'; return null; }
+function detailSummaryText(kind, count, itemCount) {
+  if (kind === 'article') return count === '—' ? 'Article word count was not returned for this stored review.' : `${count} article words counted from the manuscript text.`;
+  if (kind === 'abstract') return count === '—' ? 'Abstract word count was not returned for this stored review.' : `${count} abstract words counted from the manuscript text.`;
+  return `${itemCount} ${labelFor(kind).toLowerCase()} item${itemCount === 1 ? '' : 's'} returned from the current document map.`;
+}
 function appendDetailStatus(container, text, pending = false) { const status = document.createElement('div'); status.className = `detail-link-status small text-secondary mt-2 d-flex align-items-center gap-2${pending ? ' is-pending' : ''}`; if (pending) status.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>'; const message = document.createElement('span'); message.textContent = text; status.append(message); container.append(status); }
+function appendSourceLinksPending(container, kind) {
+  if (!['tables', 'figures', 'references'].includes(kind) || sourceLinkStatus(kind) !== 'pending') return;
+  const pending = document.createElement('div');
+  pending.className = 'details-pending d-flex align-items-center gap-3 mb-3';
+  pending.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><div><div class="small fw-semibold text-body">Finding manuscript mentions</div><div class="small text-secondary mt-1">The count is ready. Body-text mentions and jump links will appear here shortly.</div></div>';
+  container.append(pending);
+}
 function clearSourceHighlight() { document.querySelectorAll('.source-target-highlight').forEach((mark) => { const parent = mark.parentNode; parent.replaceChild(document.createTextNode(mark.textContent), mark); parent.normalize(); }); document.querySelectorAll('.ocr-reference-target, .ocr-page-source-target').forEach((target) => target.classList.remove('ocr-reference-target', 'ocr-page-source-target')); }
-function highlightExactQuote(container, quote) { if (!quote) return false; const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode())) { const offset = node.nodeValue.indexOf(quote); if (offset < 0) continue; const fragment = document.createDocumentFragment(); fragment.append(node.nodeValue.slice(0, offset)); const mark = document.createElement('mark'); mark.className = 'source-target-highlight'; mark.textContent = quote; fragment.append(mark, node.nodeValue.slice(offset + quote.length)); node.parentNode.replaceChild(fragment, node); return true; } return false; }
+function highlightExactQuote(container, quote) { if (!quote) return null; const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode())) { const offset = node.nodeValue.indexOf(quote); if (offset < 0) continue; const fragment = document.createDocumentFragment(); fragment.append(node.nodeValue.slice(0, offset)); const mark = document.createElement('mark'); mark.className = 'source-target-highlight'; mark.textContent = quote; fragment.append(mark, node.nodeValue.slice(offset + quote.length)); node.parentNode.replaceChild(fragment, node); return mark; } return null; }
+function highlightSourceItem(container, anchorQuote, itemQuote) {
+  if (!itemQuote) return null;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let node;
+  const itemNodes = [];
+  while ((node = walker.nextNode())) {
+    if (node.nodeValue.includes(itemQuote)) itemNodes.push(node);
+    if (!anchorQuote || !anchorQuote.includes(itemQuote)) continue;
+    const anchorOffset = node.nodeValue.indexOf(anchorQuote);
+    if (anchorOffset < 0) continue;
+    const itemOffset = anchorQuote.indexOf(itemQuote);
+    const offset = anchorOffset + itemOffset;
+    const fragment = document.createDocumentFragment();
+    fragment.append(node.nodeValue.slice(0, offset));
+    const mark = document.createElement('mark');
+    mark.className = 'source-target-highlight';
+    mark.textContent = itemQuote;
+    fragment.append(mark, node.nodeValue.slice(offset + itemQuote.length));
+    node.parentNode.replaceChild(fragment, node);
+    return mark;
+  }
+  if (itemNodes.length) {
+    const anchorParts = String(anchorQuote || '').split(/\s*\n+\s*|\s{2,}/).map((part) => part.trim()).filter((part) => part && part !== itemQuote);
+    const bestNode = itemNodes
+      .map((candidate) => {
+        const hostText = candidate.parentElement?.textContent || candidate.nodeValue;
+        const score = anchorParts.reduce((sum, part) => sum + (hostText.includes(part) ? 1 : 0), 0);
+        return { candidate, score };
+      })
+      .sort((left, right) => right.score - left.score)[0]?.candidate || itemNodes[0];
+    return highlightExactQuote(bestNode.parentElement || container, itemQuote);
+  }
+  return null;
+}
 function clearSearchHighlights() { document.querySelectorAll('.manuscript-search-highlight').forEach((mark) => { const parent = mark.parentNode; parent.replaceChild(document.createTextNode(mark.textContent), mark); parent.normalize(); }); document.querySelectorAll('.pdf-page-search-target').forEach((target) => target.classList.remove('pdf-page-search-target')); }
-function highlightSearchMatch(container, quote) { if (!quote) return false; const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode())) { const offset = node.nodeValue.toLocaleLowerCase().indexOf(quote.toLocaleLowerCase()); if (offset < 0) continue; const fragment = document.createDocumentFragment(); fragment.append(node.nodeValue.slice(0, offset)); const mark = document.createElement('mark'); mark.className = 'manuscript-search-highlight'; mark.textContent = node.nodeValue.slice(offset, offset + quote.length); fragment.append(mark, node.nodeValue.slice(offset + quote.length)); node.parentNode.replaceChild(fragment, node); return true; } return false; }
+function highlightSearchMatch(container, quote) { if (!quote) return null; const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT); let node; while ((node = walker.nextNode())) { const offset = node.nodeValue.toLocaleLowerCase().indexOf(quote.toLocaleLowerCase()); if (offset < 0) continue; const fragment = document.createDocumentFragment(); fragment.append(node.nodeValue.slice(0, offset)); const mark = document.createElement('mark'); mark.className = 'manuscript-search-highlight'; mark.textContent = node.nodeValue.slice(offset, offset + quote.length); fragment.append(mark, node.nodeValue.slice(offset + quote.length)); node.parentNode.replaceChild(fragment, node); return mark; } return null; }
 function searchablePageText(page = {}) { return [page.markdown || page.content || '', ...(page.blocks || []).map((block) => block.content || ''), ...(page.tables || []).map((table) => plain(table.content || ''))].filter(Boolean).join('\n'); }
 function updateSearchControls() { const total = state.search.matches.length; const active = state.search.index + 1; el('#manuscriptSearchStatus').textContent = total ? `${active} / ${total}` : state.search.query ? 'No matches' : ''; el('#manuscriptSearchPrevious').disabled = !total; el('#manuscriptSearchNext').disabled = !total; }
-function showSearchMatch() { const match = state.search.matches[state.search.index]; if (!match) return; clearSearchHighlights(); if (!pdfPane.classList.contains('d-none')) { scrollPdfToPage(match.pageNumber); const page = el(`.pdf-page[data-page="${match.pageNumber}"]`); page?.classList.add('pdf-page-search-target'); return; } const target = el(`.ocr-page[data-page="${match.pageNumber}"]`); target?.scrollIntoView({ behavior: 'smooth', block: 'center' }); highlightSearchMatch(target, match.text); }
+function showSearchMatch() { const match = state.search.matches[state.search.index]; if (!match) return; clearSearchHighlights(); if (!pdfPane.classList.contains('d-none')) { scrollPdfToPage(match.pageNumber); const page = el(`.pdf-page[data-page="${match.pageNumber}"]`); page?.classList.add('pdf-page-search-target'); return; } const target = el(`.ocr-page[data-page="${match.pageNumber}"]`); const mark = highlightSearchMatch(target, match.text); if (mark) scrollHighlightedMark(mark); else target?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function updateManuscriptSearch(query = '') { const normalized = String(query || '').trim(); state.search.query = normalized; clearSearchHighlights(); if (!normalized || !state.raw?.pages?.length) { state.search.matches = []; state.search.index = -1; updateSearchControls(); return; } const needle = normalized.toLocaleLowerCase(); state.search.matches = state.raw.pages.flatMap((page, pageIndex) => { const text = searchablePageText(page); const lower = text.toLocaleLowerCase(); const matches = []; let offset = lower.indexOf(needle); while (offset !== -1) { matches.push({ pageNumber: pageIndex + 1, text: text.slice(offset, offset + normalized.length) }); offset = lower.indexOf(needle, offset + Math.max(1, needle.length)); } return matches; }); state.search.index = state.search.matches.length ? 0 : -1; updateSearchControls(); showSearchMatch(); }
 function stepManuscriptSearch(direction) { const total = state.search.matches.length; if (!total) return; state.search.index = (state.search.index + direction + total) % total; updateSearchControls(); showSearchMatch(); }
 function resetManuscriptSearch() { el('#pdfSearchInput').value = ''; updateManuscriptSearch(''); }
-function findReferenceTarget(item, pageNumber) { const entries = [...document.querySelectorAll(`.ocr-page[data-page="${pageNumber}"] .ocr-reference-list li`)]; const number = String(item?.number || ''); if (number) { const numbered = entries.find((entry) => entry.dataset.referenceNumber === number); if (numbered) return numbered; } const text = plain(item?.text || '').replace(/\s+/g, ' ').trim(); return entries.find((entry) => entry.dataset.referenceText === text) || entries.find((entry) => text && entry.dataset.referenceText.includes(text)); }
-function jumpToSource(item, kind = '') { const source = resolveSource(item); if (!source) return; setMode('html'); clearSourceHighlight(); const referenceTarget = kind === 'references' ? findReferenceTarget(item, source.pageNumber) : null; if (referenceTarget) { referenceTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); referenceTarget.classList.add('ocr-reference-target'); window.setTimeout(() => referenceTarget?.classList.remove('ocr-reference-target'), 1800); return; } const target = el(`.ocr-page[data-page="${source.pageNumber}"]`); target?.scrollIntoView({ behavior: 'smooth', block: 'start' }); if (source.canHighlight) highlightExactQuote(target, source.highlightQuote); if (!document.querySelector('.source-target-highlight')) { target?.classList.add('ocr-page-source-target'); window.setTimeout(() => target?.classList.remove('ocr-page-source-target'), 1400); } }
-function openDetails(kind) { state.openDetailKind = kind; const tile = el(`[data-count="${kind}"]`); const count = tile?.querySelector('strong')?.textContent || '—'; const items = sourceItems(kind); const pass = detailPass(kind); const passPending = pass && state.annotationStatus[pass] === 'pending'; const body = el('#detailsPanelBody'); body.replaceChildren(); const heading = document.createElement('h2'); heading.className = 'h6 mb-3 pb-2 border-bottom'; heading.textContent = `${kind[0].toUpperCase()}${kind.slice(1)}`; body.append(heading); if (tile?.classList.contains('is-loading')) { const pending = document.createElement('div'); pending.className = 'details-pending d-flex align-items-center gap-3'; pending.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><div><div class="small fw-semibold text-body">Still preparing these details</div><div class="small text-secondary mt-1">The manuscript is ready. Results and source links will appear here shortly.</div></div>'; body.append(pending); } else { const summary = document.createElement('div'); summary.className = 'alert alert-light border py-2 px-3 small mb-3'; summary.textContent = `${count} returned from the current source-grounded document map.`; body.append(summary); if (!items.length) { const source = document.createElement('div'); source.className = 'detail-source-surface'; source.textContent = passPending ? 'Source links are being prepared.' : 'No item details were returned for this result.'; body.append(source); } else { const list = document.createElement('div'); list.className = 'vstack gap-2'; items.forEach((item) => { const source = resolveSource(item); const linked = Boolean(source); const row = document.createElement(linked ? 'button' : 'div'); if (linked) row.type = 'button'; row.className = `detail-source-surface ${linked ? 'detail-jump border-0 text-start' : 'detail-source-unavailable'}`; const text = document.createElement('div'); text.className = 'detail-source-text'; text.textContent = detailText(item, kind); row.append(text); if (source) { appendDetailStatus(row, source.canHighlight ? 'Open source in HTML' : 'Open source page in HTML'); row.addEventListener('click', () => jumpToSource(item, kind)); } else appendDetailStatus(row, 'This item is available, but its exact source link could not be confirmed.'); list.append(row); }); body.append(list); } } const panel = el('#detailsPanel'); panel.classList.add('is-open'); panel.setAttribute('aria-hidden', 'false'); }
+function findReferenceTarget(item, pageNumber) { const entries = [...document.querySelectorAll(`.ocr-page[data-page="${pageNumber}"] .ocr-reference-list li`)]; const handle = String(item?.link_handle || ''); if (handle) { const handled = entries.find((entry) => entry.dataset.referenceHandle === handle); if (handled) return handled; } const number = String(item?.number || ''); if (number) { const numbered = entries.find((entry) => entry.dataset.referenceNumber === number); if (numbered) return numbered; } const text = plain(item?.text || '').replace(/\s+/g, ' ').trim(); return entries.find((entry) => entry.dataset.referenceText === text) || entries.find((entry) => text && entry.dataset.referenceText.includes(text)); }
+function jumpToSource(item, kind = '') { const source = resolveSource(item); if (!source) return; setMode('html'); clearSourceHighlight(); const referenceTarget = kind === 'references' ? findReferenceTarget(item, source.pageNumber) : null; if (referenceTarget) { const mark = highlightExactQuote(referenceTarget, plain(item?.text || '').replace(/\s+/g, ' ').trim()); if (mark) scrollHighlightedMark(mark); else referenceTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); referenceTarget.classList.add('ocr-reference-target'); window.setTimeout(() => referenceTarget?.classList.remove('ocr-reference-target'), 1800); return; } const target = el(`.ocr-page[data-page="${source.pageNumber}"]`); const mark = source.canHighlight ? highlightSourceItem(target, source.anchorQuote, source.itemQuote) : null; if (mark) scrollHighlightedMark(mark); else { target?.scrollIntoView({ behavior: 'smooth', block: 'start' }); target?.classList.add('ocr-page-source-target'); window.setTimeout(() => target?.classList.remove('ocr-page-source-target'), 1400); } }
+function profileForAuthor(index) { return state.authorProfiles.authors[index] || null; }
+function appendAuthorProfileLinks(card, author, profile) {
+  const links = document.createElement('div');
+  links.className = 'd-flex flex-wrap align-items-center gap-2 mt-2';
+  const appendLink = (href, icon, label, kind) => {
+    if (!href) return;
+    const link = document.createElement('a');
+    link.href = href;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.className = 'author-detail-link link-secondary text-decoration-none';
+    link.dataset.authorProfileLink = kind;
+    link.innerHTML = `<i class="bi ${icon} me-1" aria-hidden="true"></i>${label}`;
+    links.append(link);
+  };
+  appendLink(profile?.openAlexUrl, 'bi-mortarboard', 'OpenAlex', 'openalex');
+  appendLink(profile?.orcidUrl, 'bi-person-badge', 'ORCID', 'orcid');
+  if (!profile?.openAlexUrl && !profile?.orcidUrl) appendLink(profile?.googleScholarUrl || googleScholarUrl(author.text), 'bi-search', 'Find in Google Scholar', 'google-scholar');
+  if (profile?.status === 'found' && (profile.worksCount || profile.citedByCount)) {
+    const meta = document.createElement('span');
+    meta.className = 'small text-secondary';
+    meta.textContent = `${profile.worksCount || 0} works · ${profile.citedByCount || 0} citations`;
+    links.append(meta);
+  }
+  card.append(links);
+}
+function appendAuthorProfilePending(container) {
+  if (state.authorProfiles.status !== 'loading') return;
+  const pending = document.createElement('div');
+  pending.className = 'small text-secondary d-flex align-items-center gap-2 mb-3';
+  pending.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Looking up external author profiles...</span>';
+  container.append(pending);
+}
+function appendAbstractDetail(list, item) {
+  const source = resolveSource(item);
+  const text = item.word_count_provenance || wordCountProvenanceFromBlocks(state.raw?.pages || [], item.prose_blocks || []);
+  const container = document.createElement('div');
+  container.className = 'detail-source-surface';
+  if (source) {
+    const jump = document.createElement('button');
+    jump.type = 'button';
+    jump.className = 'detail-jump border-0 text-start w-100 p-0 bg-transparent';
+    const label = document.createElement('div');
+    label.className = 'small fw-semibold text-body mb-2';
+    label.textContent = 'What was counted';
+    jump.append(label);
+    jump.addEventListener('click', () => jumpToSource(item, 'abstract'));
+    container.append(jump);
+  } else {
+    const label = document.createElement('div');
+    label.className = 'small fw-semibold text-body mb-2';
+    label.textContent = 'What was counted';
+    container.append(label);
+  }
+  if (text.valid) {
+    text.fragments.forEach((fragment) => {
+      const paragraph = document.createElement('p');
+      paragraph.className = 'small text-secondary mb-2';
+      paragraph.textContent = fragment;
+      container.append(paragraph);
+    });
+    list.append(container);
+    return;
+  }
+  const fallback = document.createElement('div');
+  fallback.className = 'small text-secondary';
+  fallback.textContent = 'The exact abstract source blocks were not returned for this review.';
+  container.append(fallback);
+  list.append(container);
+}
+function appendArticleCountDetails(container) {
+  const provenance = state.annotations.body?.word_count_provenance;
+  if (!provenance?.valid) return false;
+  const card = document.createElement('div');
+  card.className = 'detail-source-surface mb-2';
+  const heading = document.createElement('div');
+  heading.className = 'small fw-semibold text-body mb-2';
+  heading.textContent = 'What was counted';
+  const meta = document.createElement('div');
+  meta.className = 'small text-secondary mb-2';
+  meta.textContent = `${provenance.count} words counted from ${provenance.block_ids.length} model-selected OCR block${provenance.block_ids.length === 1 ? '' : 's'}.`;
+  card.append(heading, meta);
+  provenance.fragments.forEach((fragment) => {
+    const paragraph = document.createElement('p');
+    paragraph.className = 'small text-secondary mb-2';
+    paragraph.textContent = fragment;
+    card.append(paragraph);
+  });
+  container.append(card);
+  return true;
+}
+function appendDetailItem(list, item, kind, index) {
+  if (kind === 'abstract') {
+    appendAbstractDetail(list, item);
+    return;
+  }
+  const source = resolveSource(item);
+  const linked = Boolean(source);
+  if (kind !== 'authors') {
+    const hasOccurrences = ['tables', 'figures', 'references'].includes(kind) && Array.isArray(item.body_occurrences);
+    const container = hasOccurrences ? document.createElement('div') : null;
+    if (container) container.className = 'detail-source-surface';
+    const row = document.createElement(linked ? 'button' : 'div');
+    if (linked) row.type = 'button';
+    row.className = hasOccurrences ? `${linked ? 'detail-jump border-0 text-start w-100 p-0 bg-transparent' : 'detail-source-unavailable'}` : `detail-source-surface ${linked ? 'detail-jump border-0 text-start' : 'detail-source-unavailable'}`;
+    const text = document.createElement('div');
+    text.className = 'detail-source-text';
+    text.textContent = detailText(item, kind);
+    row.append(text);
+    if (source) row.addEventListener('click', () => jumpToSource(item, kind)); else appendDetailStatus(row, 'This item is available, but its exact source link could not be confirmed.');
+    if (!container) { list.append(row); return; }
+    container.append(row);
+    const occurrences = (item.body_occurrences || []).filter((occurrence) => resolveSource({ source: occurrence.source }));
+    const linksStatus = sourceLinkStatus(kind);
+    if (linksStatus !== 'ready') {
+      appendDetailStatus(container, linksStatus === 'unavailable' ? 'Manuscript-use links are currently unavailable.' : 'Finding body-text mentions...', linksStatus === 'pending');
+      list.append(container);
+      return;
+    }
+    const heading = document.createElement('div');
+    heading.className = 'small text-secondary border-top mt-3 pt-2 mb-1';
+    heading.textContent = `${occurrences.length} occurrence${occurrences.length === 1 ? '' : 's'} in the body text`;
+    container.append(heading);
+    occurrences.forEach((occurrence) => {
+      const occurrenceRow = document.createElement('button');
+      occurrenceRow.type = 'button';
+      occurrenceRow.className = 'detail-occurrence-jump border-0 bg-transparent text-start w-100 px-0 py-2';
+      const citation = document.createElement('div');
+      citation.className = 'small fw-semibold text-body';
+      citation.textContent = occurrence.citation_text;
+      const context = document.createElement('div');
+      context.className = 'small text-secondary mt-1';
+      context.textContent = occurrence.context_quote;
+      occurrenceRow.append(citation, context);
+      occurrenceRow.addEventListener('click', () => jumpToSource({ source: occurrence.source, item_exact_quote: occurrence.citation_text }, ''));
+      container.append(occurrenceRow);
+    });
+    list.append(container);
+    return;
+  }
+  const card = document.createElement('div');
+  card.className = 'author-detail-card detail-source-surface';
+  const sourceRow = document.createElement(linked ? 'button' : 'div');
+  if (linked) sourceRow.type = 'button';
+  sourceRow.className = linked ? 'detail-jump border-0 text-start w-100 p-0 bg-transparent' : 'detail-source-unavailable';
+  const text = document.createElement('div');
+  text.className = 'detail-source-text';
+  text.textContent = detailText(item, kind);
+  sourceRow.append(text);
+  if (source) sourceRow.addEventListener('click', () => jumpToSource(item, kind)); else appendDetailStatus(sourceRow, 'This item is available, but its exact source link could not be confirmed.');
+  card.append(sourceRow);
+  if (state.authorProfiles.status !== 'loading') appendAuthorProfileLinks(card, item, profileForAuthor(index));
+  list.append(card);
+}
+function appendAffiliationSourceRow(card, item) {
+  const source = resolveSource(item);
+  const row = document.createElement(source ? 'button' : 'div');
+  if (source) row.type = 'button';
+  row.className = source ? 'detail-jump border-0 text-start w-100 p-0 bg-transparent' : 'detail-source-unavailable';
+  const text = document.createElement('div');
+  text.className = 'detail-source-text';
+  text.textContent = item.text;
+  row.append(text);
+  if (source) {
+    row.addEventListener('click', () => jumpToSource(item, 'affiliations'));
+  } else appendDetailStatus(row, 'This item is available, but its exact source link could not be confirmed.');
+  card.append(row);
+}
+function setAffiliationFilter(body, filter = 'all') {
+  state.affiliationFilter = filter === 'issues' ? 'issues' : 'all';
+  body.querySelectorAll('[data-affiliation-linkage-card]').forEach((card) => {
+    const visible = state.affiliationFilter === 'all'
+      ? card.dataset.affiliationLinkageType === 'affiliation'
+      : card.dataset.affiliationLinkageIssue === 'true';
+    card.classList.toggle('d-none', !visible);
+  });
+  const action = body.querySelector('[data-affiliation-filter-action]');
+  if (action) action.textContent = state.affiliationFilter === 'issues' ? 'Show all affiliations' : 'Show linking issues';
+}
+function appendAffiliationDetails(body) {
+  const linkage = projectAffiliationLinkage(state.annotations['front-matter'] || {});
+  if (!linkage.available) return false;
+  const authorTotal = linkage.authors.length;
+  const affiliationTotal = linkage.affiliations.length;
+  const allLinked = linkage.authorLinked === authorTotal && linkage.affiliationLinked === affiliationTotal;
+  const summary = document.createElement('div');
+  summary.className = `alert ${allLinked ? 'alert-success' : 'alert-light border'} d-flex align-items-center gap-2 py-2 px-3 small mb-2`;
+  summary.innerHTML = `<i class="bi ${allLinked ? 'bi-check-circle-fill' : 'bi-link-45deg'} flex-shrink-0" aria-hidden="true"></i><span>${allLinked ? `All ${authorTotal} author${authorTotal === 1 ? '' : 's'} linked to an affiliation and all ${affiliationTotal} affiliation${affiliationTotal === 1 ? '' : 's'} linked to an author.` : `${linkage.authorLinked}/${authorTotal} authors linked to an affiliation; ${linkage.affiliationLinked}/${affiliationTotal} affiliations linked to an author.`}</span>`;
+  body.append(summary);
+  const unlinkedAuthors = linkage.authors.filter((author) => !author.linkedAffiliationIndexes.length);
+  const unlinkedAffiliations = linkage.affiliations.filter((affiliation) => !affiliation.linkedAuthorIndexes.length);
+  if (unlinkedAuthors.length || unlinkedAffiliations.length) {
+    const issue = document.createElement('div');
+    issue.className = 'alert alert-warning d-flex align-items-center justify-content-between gap-3 py-2 px-3 mb-2 w-100';
+    issue.innerHTML = `<div class="d-flex align-items-center gap-2 min-w-0"><i class="bi bi-exclamation-triangle-fill flex-shrink-0" aria-hidden="true"></i><span class="small fw-semibold">Affiliation linking issues found (${unlinkedAuthors.length + unlinkedAffiliations.length})</span></div>`;
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'btn btn-sm btn-outline-warning flex-shrink-0';
+    action.dataset.affiliationFilterAction = '';
+    action.textContent = 'Show linking issues';
+    action.addEventListener('click', () => setAffiliationFilter(body, state.affiliationFilter === 'issues' ? 'all' : 'issues'));
+    issue.append(action);
+    body.append(issue);
+  }
+  const list = document.createElement('div');
+  list.className = 'vstack gap-2';
+  linkage.affiliations.forEach((affiliation) => {
+    const card = document.createElement('div');
+    const hasIssue = !affiliation.linkedAuthorIndexes.length;
+    card.className = 'detail-source-surface affiliation-detail-card';
+    card.dataset.affiliationLinkageCard = '';
+    card.dataset.affiliationLinkageType = 'affiliation';
+    card.dataset.affiliationLinkageIssue = String(hasIssue);
+    appendAffiliationSourceRow(card, affiliation);
+    const linked = document.createElement('div');
+    linked.className = 'mt-3';
+    const label = document.createElement('div');
+    label.className = 'small text-secondary mb-2';
+    label.textContent = 'Linked authors';
+    linked.append(label);
+    if (affiliation.linkedAuthors.length) {
+      const badges = document.createElement('div');
+      badges.className = 'd-flex flex-wrap gap-1';
+      affiliation.linkedAuthors.forEach((author) => { const badge = document.createElement('span'); badge.className = 'badge rounded-pill bg-body-secondary text-body fw-normal'; badge.textContent = author.text; badges.append(badge); });
+      linked.append(badges);
+    } else {
+      const message = document.createElement('div');
+      message.className = 'small text-warning-emphasis';
+      message.textContent = 'No linked authors were returned for this affiliation.';
+      linked.append(message);
+    }
+    card.append(linked);
+    list.append(card);
+  });
+  unlinkedAuthors.forEach((author) => {
+    const card = document.createElement('div');
+    card.className = 'detail-source-surface affiliation-detail-card d-none';
+    card.dataset.affiliationLinkageCard = '';
+    card.dataset.affiliationLinkageType = 'author';
+    card.dataset.affiliationLinkageIssue = 'true';
+    appendAffiliationSourceRow(card, author);
+    const message = document.createElement('div');
+    message.className = 'small text-warning-emphasis mt-2';
+    message.textContent = 'No affiliation was returned for this author.';
+    card.append(message);
+    list.append(card);
+  });
+  body.append(list);
+  setAffiliationFilter(body, 'all');
+  return true;
+}
+function openDetails(kind) {
+  state.openDetailKind = kind;
+  const tile = el(`[data-count="${kind}"]`);
+  const count = tile?.querySelector('strong')?.textContent || '—';
+  const items = sourceItems(kind);
+  const pass = detailPass(kind);
+  const passPending = pass && state.annotationStatus[pass] === 'pending';
+  const currentState = categoryState(kind);
+  const body = el('#detailsPanelBody');
+  body.replaceChildren();
+  const heading = document.createElement('h2');
+  heading.className = 'h6 mb-3 pb-2 border-bottom';
+  heading.textContent = `${kind[0].toUpperCase()}${kind.slice(1)}`;
+  body.append(heading);
+  if (tile?.classList.contains('is-loading') || ['waiting', 'extracting'].includes(currentState)) {
+    const pending = document.createElement('div');
+    pending.className = 'details-pending d-flex align-items-center gap-3';
+    pending.innerHTML = kind === 'references'
+      ? '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><div><div class="small fw-semibold text-body">Separating individual references</div><div class="small text-secondary mt-1">The manuscript is ready. References and their HTML source links will appear here shortly.</div></div>'
+      : '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><div><div class="small fw-semibold text-body">Preparing this result</div><div class="small text-secondary mt-1">The reader is ready. This result will appear as soon as its annotation range is available.</div></div>';
+    body.append(pending);
+  } else {
+    const summary = document.createElement('div');
+    summary.className = 'alert alert-light border py-2 px-3 small mb-3';
+    summary.textContent = detailSummaryText(kind, count, items.length);
+    body.append(summary);
+    appendSourceLinksPending(body, kind);
+    if (kind === 'authors') appendAuthorProfilePending(body);
+    if (kind === 'article') appendArticleCountDetails(body);
+    if (kind === 'affiliations' && appendAffiliationDetails(body)) {
+      // The model-authored linkage view supplies its own cards.
+    } else if (!items.length) {
+      const source = document.createElement('div');
+      source.className = 'detail-source-surface';
+      source.textContent = passPending ? 'Preparing this result...' : 'No item details were returned for this result.';
+      body.append(source);
+    } else {
+      const list = document.createElement('div');
+      list.className = 'vstack gap-2';
+      items.forEach((item, index) => appendDetailItem(list, item, kind, index));
+      body.append(list);
+    }
+  }
+  const panel = el('#detailsPanel');
+  panel.classList.add('is-open');
+  panel.setAttribute('aria-hidden', 'false');
+}
+
+function revealAnnotationProgress() {
+  const references = state.annotations.references || { references: [] };
+  const staged = projectAnnotationChunks(state.annotationChunks, { pages: state.raw?.pages || [] });
+  state.annotationCandidates = staged.candidates;
+  state.annotations = projectAnnotation(staged.annotation);
+  state.annotations.references = references;
+  const front = state.annotations['front-matter'];
+  if (front.authors?.length || front.affiliations?.length || front.keywords?.length || front.abstract?.source || Array.isArray(front.abstract?.prose_blocks)) showFrontMatterCounts(front);
+  const body = state.annotations.body;
+  if (body.sections?.length || body.prose_blocks?.length || body.article_text_ranges?.length || body.display_items?.length) showBodyCounts(body);
+}
+
+function finishDirectSourceLinks() {
+  ['affiliations', 'abstract', 'keywords'].forEach((kind) => { if (!el(`[data-count="${kind}"]`)?.classList.contains('is-loading')) { if (categoryState(kind) !== 'unavailable') setCategoryState(kind, 'ready'); setTileProgress(kind, 100, categoryState(kind) === 'unavailable' ? 'Unavailable' : 'Ready'); if (categoryState(kind) !== 'unavailable') recordSourceLinksReady(kind); } });
+  const articleTile = el('[data-count="article"]');
+  if (articleTile && !articleTile.classList.contains('is-loading')) {
+    const available = articleTile.querySelector('strong')?.textContent !== '—';
+    setCategoryState('article', available ? 'ready' : 'unavailable');
+    setTileProgress('article', 100, available ? 'Ready' : 'Article text unavailable');
+    if (available) recordSourceLinksReady('article');
+  }
+  if (state.authorProfiles.status !== 'loading' && !el('[data-count="authors"]')?.classList.contains('is-loading')) { if (categoryState('authors') !== 'unavailable') setCategoryState('authors', 'ready'); setTileProgress('authors', 100, categoryState('authors') === 'unavailable' ? 'Unavailable' : 'Ready'); if (categoryState('authors') !== 'unavailable') recordSourceLinksReady('authors'); }
+  const referenceTile = el('[data-count="references"]');
+  if (referenceTile && !referenceTile.classList.contains('is-loading')) {
+    const references = sourceItems('references');
+    const confirmed = references.filter(sourceIsUsable).length;
+    const linksReady = state.referenceLinksStatus === 'ready';
+    const linksPending = state.referenceLinksStatus === 'pending';
+    setCategoryState('references', linksPending ? 'linking' : references.length && confirmed !== references.length ? 'counted' : linksReady ? 'ready' : 'counted');
+    setTileProgress('references', linksReady ? 100 : 76, linksReady ? 'Ready' : linksPending ? 'Finding body citations' : 'Count ready');
+    if (linksReady) recordSourceLinksReady('references');
+  }
+}
+
+async function runBodyCitationStage(base64) {
+  const ranges = bodyCitationPageRanges(state.annotationChunks);
+  state.citationExtraction = { status: 'pending', ranges: [], candidates: [] };
+  recordRuntime(
+    'Body citation extraction started',
+    `${ranges.length} bounded article-page range${ranges.length === 1 ? '' : 's'} scheduled.`,
+    'body-citations:start',
+    { rangeCount: ranges.length }
+  );
+  if (!ranges.length) {
+    state.citationExtraction.status = 'unavailable';
+    recordRuntime('Body citation extraction unavailable', 'Broad annotation returned no article-page scope.', 'body-citations:unavailable');
+    return;
+  }
+  const records = [];
+  const failures = [];
+  for (const [index, pages] of ranges.entries()) {
+    try {
+      const response = await request('/api/ocr/citations', JSON.stringify({ base64, pages }));
+      if (!response.response.ok) throw new Error(response.result?.error || 'Body citation extraction was unavailable.');
+      records.push({ range_id: `citation-range-${index}`, pages, annotation: response.result.annotation });
+      recordRuntime(
+        'Body citation range ready',
+        `Pages ${pages[0] + 1}-${pages.at(-1) + 1}: ${response.result.annotation.citation_mentions.length} citation groups returned.`,
+        `body-citations:range:${pages[0]}`
+      );
+    } catch (error) {
+      failures.push({ range_id: `citation-range-${index}`, pages, message: error?.message || 'Body citation extraction was unavailable.' });
+      recordRuntime('Body citation range unavailable', `Pages ${pages[0] + 1}-${pages.at(-1) + 1}.`, `body-citations:range:${pages[0]}`);
+    }
+  }
+  const grounded = bindCitationAnnotationRanges(records, state.raw?.pages || []);
+  const failedRanges = failures.map((failure) => ({
+    id: failure.range_id,
+    pages: failure.pages,
+    returned: 0,
+    accepted: 0,
+    rejected: 0,
+    reasonCounts: { request_unavailable: 1 },
+    failureMessage: failure.message,
+    items: []
+  }));
+  state.citationExtraction = {
+    status: failures.length ? 'unavailable' : 'ready',
+    ranges: [...grounded.ranges, ...failedRanges].sort((first, second) => (first.pages[0] ?? 0) - (second.pages[0] ?? 0)),
+    candidates: failures.length ? [] : grounded.candidates
+  };
+  state.annotationCandidates = {
+    ...(state.annotationCandidates || {}),
+    citation_mentions: state.citationExtraction.candidates
+  };
+  const returned = grounded.ranges.reduce((total, range) => total + range.returned, 0);
+  const rejected = grounded.ranges.reduce((total, range) => total + range.rejected, 0);
+  if (failures.length) {
+    recordRuntime('Body citation extraction unavailable', `${failures.length}/${ranges.length} bounded ranges failed; Document QnA reference mapping was not started.`, 'body-citations:unavailable');
+  } else {
+    recordRuntime('Body citation extraction ready', `${returned} returned; ${grounded.candidates.length} grounded; ${rejected} rejected.`, 'body-citations:ready', {
+      returned,
+      accepted: grounded.candidates.length,
+      rejected
+    });
+  }
+}
+
+async function startReferenceLinks() {
+  const references = state.annotations.references?.references || [];
+  const citationMentions = state.annotationCandidates?.citation_mentions || [];
+  if (!references.length) return;
+  const candidates = {
+    references: references.map((item) => ({ handle: item.link_handle, text: item.text })),
+    citation_mentions: citationMentions
+  };
+  state.documentQna.references = {
+    status: 'pending',
+    inputs: { references: references.length, bodyCitations: citationMentions.length },
+    links: null
+  };
+  recordRuntime(
+    'Reference link inputs prepared',
+    `${references.length} references and ${citationMentions.length} source-grounded body citation groups are available.`,
+    'reference-links:inputs',
+    { referenceCount: references.length, citationMentionCount: citationMentions.length }
+  );
+  state.referenceLinksStatus = 'pending';
+  setCategoryState('references', 'linking');
+  setTileProgress('references', 76, 'Finding body citations');
+  refreshOpenDetails(['references']);
+  if (!citationMentions.length) {
+    state.referenceLinksStatus = 'unavailable';
+    setCategoryState('references', 'counted', 'The reference count is final; document annotation returned no body citation groups.');
+    setTileProgress('references', 76, 'Citation links unavailable');
+    recordRuntime(
+      'Reference links unavailable',
+      'Document annotation returned 0 body citation groups, so no relation request was sent.',
+      'reference-links:unavailable',
+      { reason: 'no_citation_mentions' }
+    );
+    state.documentQna.references = { ...state.documentQna.references, status: 'unavailable', message: 'No grounded body citations were available for mapping.' };
+    refreshOpenDetails(['references']);
+    return;
+  }
+  recordRuntime('Reference links started', `${citationMentions.length} source-grounded body citation groups are being matched to ${references.length} references.`, 'reference-links:start');
+  try {
+    const result = await request('/api/ocr/reference-links', JSON.stringify({ candidates }));
+    if (!result.response.ok) throw new Error(result.result?.error || 'Reference links were unavailable.');
+    state.annotations.references.references = applyReferenceLinks(references, candidates, result.result.links);
+    state.documentQna.references = { ...state.documentQna.references, status: 'ready', links: result.result.links };
+    state.referenceLinksStatus = 'ready';
+    setCategoryState('references', 'ready');
+    setTileProgress('references', 100, 'Ready');
+    recordRuntime('Reference links ready', 'Body-text citation mappings returned and validated.', 'reference-links:ready');
+  } catch {
+    state.documentQna.references = { ...state.documentQna.references, status: 'unavailable', message: 'The reference relation response was unavailable or invalid.' };
+    state.referenceLinksStatus = 'unavailable';
+    setCategoryState('references', 'counted', 'The reference count is final; body-text citation links are unavailable.');
+    setTileProgress('references', 76, 'Citation links unavailable');
+    recordRuntime('Reference links unavailable', 'Bibliography jump links remain available.', 'reference-links:unavailable');
+  }
+  refreshOpenDetails(['references']);
+}
+
+async function startSourceLinks(base64) {
+  const candidates = state.annotationCandidates;
+  if (!candidates || !state.raw?.pages?.length) return;
+  const jobs = [];
+  if (candidates.displays?.length) jobs.push({
+    label: 'Display source links',
+    kinds: ['tables', 'figures'],
+    candidates: { displays: candidates.displays || [], display_mentions: candidates.display_mentions || [] }
+  });
+  const managedKinds = ['tables', 'figures'];
+  if (!jobs.length) { setSourceLinkStatus(managedKinds, 'ready'); managedKinds.forEach((kind) => { if (categoryState(kind) !== 'unavailable') setCategoryState(kind, 'ready'); setTileProgress(kind, 100, categoryState(kind) === 'unavailable' ? 'Unavailable' : 'Ready'); }); finishDirectSourceLinks(); return; }
+  const jobKinds = new Set(jobs.flatMap((job) => job.kinds));
+  managedKinds.filter((kind) => !jobKinds.has(kind)).forEach((kind) => {
+    setSourceLinkStatus([kind], 'ready');
+    if (categoryState(kind) !== 'unavailable') setCategoryState(kind, 'ready');
+    setTileProgress(kind, 100, categoryState(kind) === 'unavailable' ? 'Unavailable' : 'Ready');
+  });
+  recordRuntime('Display links started', 'Mistral is checking table and figure mentions.', 'display-links');
+  for (const job of jobs) {
+    const qnaRecord = { status: 'pending', inputs: { displays: job.candidates.displays.length, bodyMentions: job.candidates.display_mentions.length }, links: null };
+    state.documentQna.displays.push(qnaRecord);
+    setSourceLinkStatus(job.kinds, 'pending');
+    job.kinds.forEach((kind) => { if (!el(`[data-count="${kind}"]`)?.classList.contains('is-loading')) { setCategoryState(kind, 'linking'); setTileProgress(kind, 76, 'Preparing manuscript links'); } });
+    refreshOpenDetails(job.kinds);
+    try {
+      const result = await request('/api/ocr/display-links', JSON.stringify({ candidates: job.candidates }));
+      if (!result.response.ok) throw new Error(result.result?.error || 'Source links were unavailable.');
+      state.annotations = applySourceLinks(state.annotations, job.candidates, result.result.links);
+      Object.assign(qnaRecord, { status: 'ready', links: result.result.links });
+      setSourceLinkStatus(job.kinds, 'ready');
+      job.kinds.forEach((kind) => { setCategoryState(kind, 'ready'); setTileProgress(kind, 100, 'Ready'); recordSourceLinksReady(kind); });
+      recordRuntime(`${job.label} ready`, 'Mistral mappings returned and validated.', `display-links:${job.kinds.join('-')}`);
+    } catch {
+      Object.assign(qnaRecord, { status: 'unavailable', message: 'The display relation response was unavailable or invalid.' });
+      setSourceLinkStatus(job.kinds, 'unavailable');
+      job.kinds.forEach((kind) => { if (!el(`[data-count="${kind}"]`)?.classList.contains('is-loading')) { setCategoryState(kind, 'counted', 'The count is final; manuscript-use links are unavailable.'); setTileProgress(kind, 72, 'Links unavailable'); } });
+      recordRuntime(`${job.label} unavailable`, 'Direct source locations remain available.', `display-links:${job.kinds.join('-')}`);
+    }
+    refreshOpenDetails(job.kinds);
+  }
+  finishDirectSourceLinks();
+}
+function startAuthorProfileLookup(authors = []) {
+  const validAuthors = authors
+    .map((author) => ({ ...author, text: String(author?.text || author?.label || author?.name || '').trim() }))
+    .filter((author) => author.text);
+  const token = ++state.authorProfileToken;
+  if (!validAuthors.length) { state.authorProfiles = { status: 'idle', authors: [] }; return; }
+  state.authorProfiles = { status: 'loading', authors: [] };
+  if (state.openDetailKind === 'authors') openDetails('authors');
+  recordRuntime('Author profile lookup started', `${validAuthors.length} authors sent to OpenAlex.`, 'author-profiles:start');
+  request('/api/author-profiles', JSON.stringify({ authors: validAuthors.map(({ text, orcid = '' }) => ({ text, orcid })) }))
+    .then(({ response, result }) => {
+      if (token !== state.authorProfileToken) return;
+      if (!response.ok) throw new Error(result?.error || 'Author profile lookup failed.');
+      const profiles = Array.isArray(result?.authors) ? result.authors : [];
+      state.authorProfiles = { status: 'ready', authors: profiles };
+      setTileProgress('authors', 100, 'Ready');
+      persistAuthorProfiles(profiles);
+      recordRuntime('Author profile lookup ready', `${profiles.filter((profile) => profile.status === 'found').length}/${validAuthors.length} OpenAlex profiles found.`, 'author-profiles:ready');
+      if (state.openDetailKind === 'authors') openDetails('authors');
+    })
+    .catch(() => {
+      if (token !== state.authorProfileToken) return;
+      state.authorProfiles = { status: 'unavailable', authors: [] };
+      setTileProgress('authors', 100, 'Ready');
+      persistAuthorProfiles([]);
+      recordRuntime('Author profile lookup unavailable', 'Google Scholar search links remain available.', 'author-profiles:unavailable');
+      if (state.openDetailKind === 'authors') openDetails('authors');
+    });
+}
 function applyPaneWidths() { reader.style.setProperty('--toc-width', `${state.tocWidth}px`); reader.style.setProperty('--counts-width', `${state.countsWidth}px`); }
 function schedulePdfRender() { if (!state.pdf) return; window.clearTimeout(state.pdfResizeTimer); state.pdfResizeTimer = window.setTimeout(() => { renderPdfPages(); }, 90); }
 async function renderPdfPages() {
@@ -131,44 +1577,160 @@ async function loadPdf(data) {
 function beginResize(side, event) { if (reader.classList.contains(`${side}-collapsed`)) return; state.resizing = side; reader.classList.add('is-resizing'); event.preventDefault(); }
 function moveResize(event) { if (!state.resizing) return; const bounds = reader.getBoundingClientRect(); if (state.resizing === 'toc') state.tocWidth = Math.max(176, Math.min(480, event.clientX - bounds.left)); else state.countsWidth = Math.max(330, Math.min(620, bounds.right - event.clientX)); applyPaneWidths(); schedulePdfRender(); }
 function endResize() { state.resizing = null; reader.classList.remove('is-resizing'); schedulePdfRender(); }
+async function runAnnotationStages(base64, { beforeRemainingRanges } = {}) {
+  state.annotationCoverage = createAnnotationRunManifest(state.raw?.pages?.length || 0);
+  state.annotationStatus = { ...state.annotationStatus, 'front-matter': 'pending', body: 'pending' };
+  const failures = [];
+  const processRange = async (range) => {
+    const pages = range.pages;
+    try {
+      const response = await request('/api/ocr/annotate', JSON.stringify({ base64, pages, sourcePageMap: documentAnnotationSourcePageMap(state.raw?.pages || [], pages) }));
+      if (!response.response.ok) throw new Error(response.result?.error || 'Document annotation was unavailable.');
+      state.annotationChunks.push({ range_id: range.id, pages, annotation: response.result.annotation });
+      state.annotationCoverage = markAnnotationRange(state.annotationCoverage, pages, 'completed');
+      revealAnnotationProgress();
+      recordRuntime('Annotation pages ready', `Pages ${pages[0] + 1}-${pages.at(-1) + 1} returned.`, `annotation:${pages[0]}`);
+    } catch (error) {
+      failures.push({ pages, message: error?.message || 'Document annotation was unavailable.' });
+      state.annotationCoverage = markAnnotationRange(state.annotationCoverage, pages, 'failed');
+      recordRuntime('Annotation pages unavailable', `Pages ${pages[0] + 1}-${pages.at(-1) + 1}: ${error?.message || 'Document annotation was unavailable.'}`, `annotation:${pages[0]}`);
+      revealAnnotationProgress();
+    }
+  };
+  const ranges = state.annotationCoverage.ranges;
+  if (ranges.length) await processRange(ranges[0]);
+  if (ranges.length > 1) {
+    if (typeof beforeRemainingRanges === 'function') await beforeRemainingRanges();
+    const remaining = ranges.slice(1);
+    let nextRange = 0;
+    const worker = async () => {
+      while (nextRange < remaining.length) {
+        const range = remaining[nextRange];
+        nextRange += 1;
+        await processRange(range);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, remaining.length) }, () => worker()));
+  }
+  const complete = annotationManifestIsComplete(state.annotationCoverage);
+  state.annotationStatus = complete
+    ? { ...state.annotationStatus, 'front-matter': 'ready', body: 'ready' }
+    : { ...state.annotationStatus, 'front-matter': state.annotationChunks.length ? 'ready' : 'unavailable', body: 'unavailable' };
+  revealAnnotationProgress();
+  finishDirectSourceLinks();
+  settlePendingCounts();
+  if (!state.annotationChunks.length) throw new Error(failures[0]?.message || 'Document annotation was unavailable.');
+  if (!complete) {
+    setSourceLinkStatus(['tables', 'figures'], 'unavailable');
+    const summary = annotationManifestSummary(state.annotationCoverage);
+    recordRuntime('Annotation coverage incomplete', `${summary.failedCount}/${summary.rangeCount} annotation range${summary.rangeCount === 1 ? '' : 's'} unavailable. Article counts were not finalized.`, 'annotation-coverage');
+    return;
+  }
+}
 async function upload(file) {
   if (file.type !== 'application/pdf') { fileName.textContent = 'Choose a PDF file.'; return; }
   if (file.size > 4 * 1024 * 1024) { fileName.textContent = 'This deployment accepts PDFs up to 4 MB.'; return; }
-  showReader(); startRuntime(); state.annotations = { 'front-matter': null, body: null, references: null }; state.annotationStatus = { 'front-matter': 'idle', body: 'idle', references: 'idle' }; recordRuntime('Upload started', file.name); fileName.textContent = file.name; setMode('pdf'); showProgress();
+  showReader(); startRuntime(); state.currentReview = null; state.preservingRuntimeSnapshot = false; state.annotations = { 'front-matter': null, body: null, references: { references: [] } }; state.annotationChunks = []; state.annotationCandidates = null; state.citationExtraction = { status: 'idle', ranges: [], candidates: [] }; state.documentQna = { references: null, displays: [] }; state.annotationStatus = { 'front-matter': 'idle', body: 'idle', references: 'idle' }; state.annotationCoverage = { ranges: [], completed: [], failed: [] }; state.categoryStates = initialCategoryStates(); state.sourceLinksStatus = 'idle'; state.sourceLinksByKind = { tables: 'idle', figures: 'idle' }; state.referenceLinksStatus = 'idle'; state.authorProfiles = { status: 'idle', authors: [] }; state.authorProfileToken += 1; recordRuntime('Upload started', file.name); fileName.textContent = file.name; setMode('pdf'); showProgress();
   const pdfBytes = await file.arrayBuffer();
   const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
   loadPdf(pdfBytes.slice(0)).catch(() => { pdfEmpty.classList.remove('d-none'); pdfEmpty.querySelector('p').textContent = 'The PDF preview could not be rendered.'; });
   const base64 = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = reject; reader.readAsDataURL(file); });
   const payload = JSON.stringify({ fileName: file.name, base64 });
-  let analysis;
-  try { analysis = await request('/api/ocr/analyse', payload); } catch { recordRuntime('Document analysis unavailable'); toc.textContent = 'Document structure is unavailable.'; return; }
-  if (!analysis.response.ok) { recordRuntime('Document analysis unavailable', analysis.result.error || 'Request failed.'); toc.textContent = 'Document structure is unavailable.'; note.textContent = 'The OCR source could not be returned.'; return; }
-  const annotations = projectAnnotation(analysis.result.annotation);
-  recordRuntime('OCR and annotation ready', `${analysis.result.pages.length} pages in ${(Number(analysis.result.elapsedMs || 0) / 1000).toFixed(1)} s.`);
-  showRawOcr(analysis.result);
-  showFrontMatterCounts(annotations['front-matter']);
-  showBodyCounts(annotations.body);
-  showReferenceCounts(annotations.references);
-  recordRuntime('Source-linked counts ready', 'One model-authored document map returned.', 'annotation');
-  fileName.textContent = `${analysis.result.fileName} · source-linked results ready in ${(Number(analysis.result.elapsedMs || 0) / 1000).toFixed(1)} s`;
-  try { const id = crypto.randomUUID(); await saveReview({ id, fileName: file.name, savedAt: new Date().toISOString(), pdfBlob, raw: analysis.result, annotations }); recordRuntime('Review stored locally', 'Available from the home page without another OCR request.'); } catch { recordRuntime('Local review storage unavailable', 'This review remains open but could not be saved in this browser.'); }
+  let raw;
+  try { raw = await request('/api/ocr/raw', payload); } catch { recordRuntime('OCR unavailable'); toc.textContent = 'Document structure is unavailable.'; return; }
+  if (!raw.response.ok) { recordRuntime('OCR unavailable', raw.result.error || 'Request failed.'); toc.textContent = 'Document structure is unavailable.'; note.textContent = 'The OCR source could not be returned.'; return; }
+  recordRuntime('OCR ready', `${raw.result.pages.length} pages returned.`, 'raw-ocr');
+  showRawOcr(raw.result);
+  const referencePromise = settled(runReferenceAnnotationStage(base64));
+  const annotationPromise = settled(runAnnotationStages(base64, { beforeRemainingRanges: () => referencePromise }));
+  const [annotationResult, referenceResult] = await Promise.all([annotationPromise, referencePromise]);
+  if (annotationResult.status === 'rejected') {
+    state.annotationStatus = { ...state.annotationStatus, 'front-matter': 'unavailable', body: 'unavailable' };
+    state.sourceLinksStatus = 'unavailable';
+    setSourceLinkStatus(['tables', 'figures'], 'unavailable');
+    revealAnnotationProgress();
+    settlePendingCounts();
+    finishDirectSourceLinks();
+    recordRuntime('Annotation unavailable', annotationResult.reason?.message || 'Results could not be prepared.');
+    note.textContent = 'The reader is ready. Some review details are still unavailable.';
+  }
+  if (referenceResult.status === 'rejected') {
+    state.annotationStatus.references = 'unavailable';
+    state.referenceLinksStatus = 'unavailable';
+    setCategoryState('references', 'unavailable');
+    setCount('references', '—', false);
+    setTileProgress('references', 0, 'Unavailable');
+    refreshOpenDetails(['references']);
+    recordRuntime('Reference inventory unavailable', referenceResult.reason?.message || 'Individual references could not be prepared.', 'reference-inventory:unavailable');
+  }
+  if (annotationResult.status === 'fulfilled' && referenceResult.status === 'fulfilled' && annotationManifestIsComplete(state.annotationCoverage)) {
+    await runBodyCitationStage(base64);
+    await Promise.all([startSourceLinks(base64), startReferenceLinks()]);
+  } else if (referenceResult.status === 'fulfilled') {
+    state.referenceLinksStatus = 'unavailable';
+    finishDirectSourceLinks();
+  }
+  fileName.textContent = `${raw.result.fileName} · review results ready`;
+  try {
+    state.currentReview = { id: crypto.randomUUID(), fileName: file.name, savedAt: new Date().toISOString(), pdfBlob, raw: raw.result, annotations: state.annotations, annotationChunks: state.annotationChunks, annotationCoverage: state.annotationCoverage, citationExtraction: state.citationExtraction, documentQna: state.documentQna, sourceLinksStatus: state.sourceLinksStatus, sourceLinksByKind: state.sourceLinksByKind, referenceLinksStatus: state.referenceLinksStatus, authorProfiles: [], runtimeSummary: runtime.entries() };
+    await saveReview(state.currentReview);
+    if (state.authorProfiles.status === 'ready') persistAuthorProfiles(state.authorProfiles.authors);
+    recordRuntime('Review stored locally', 'Available from the home page without another OCR request.', 'storage');
+  } catch {
+    state.currentReview = null;
+    recordRuntime('Local review storage unavailable', 'This review remains open but could not be saved in this browser.', 'storage');
+  }
 }
 async function openStoredReview(stored, pdfData, detail) {
-  startRuntime(); recordRuntime('Stored review opened', 'Loading locally saved OCR and annotation results.');
+  const hasOriginalRuntime = Array.isArray(stored.runtimeSummary) && stored.runtimeSummary.length > 0;
+  startRuntime(hasOriginalRuntime ? stored.runtimeSummary : null);
+  state.preservingRuntimeSnapshot = hasOriginalRuntime;
+  if (!hasOriginalRuntime) recordRuntime('Stored review opened', 'Loading locally saved OCR and annotation results.');
   state.annotations = { 'front-matter': null, body: null, references: null };
-  state.annotationStatus = { 'front-matter': 'idle', body: 'idle', references: 'idle' };
+  state.annotationChunks = Array.isArray(stored.annotationChunks) ? stored.annotationChunks : [];
+  state.annotationCandidates = null;
+  state.citationExtraction = stored.citationExtraction || { status: 'idle', ranges: [], candidates: [] };
+  state.documentQna = stored.documentQna || { references: null, displays: [] };
+  state.annotationCoverage = stored.annotationCoverage || { ranges: [], completed: [], failed: [] };
+  state.annotationStatus = { 'front-matter': 'ready', body: 'ready', references: 'ready' };
+  state.categoryStates = initialCategoryStates('ready');
+  state.sourceLinksStatus = stored.sourceLinksStatus || 'ready';
+  state.sourceLinksByKind = stored.sourceLinksByKind || { tables: state.sourceLinksStatus, figures: state.sourceLinksStatus };
+  state.referenceLinksStatus = stored.referenceLinksStatus || 'unavailable';
+  state.authorProfiles = { status: 'idle', authors: [] };
+  state.authorProfileToken += 1;
+  state.currentReview = stored?.id && stored.pdfBlob ? stored : null;
   showReader();
   setMode('pdf');
   showProgress();
   loadPdf(pdfData);
-  recordRuntime('Stored OCR ready', `${stored.raw.pages.length} pages loaded without an API request.`);
+  if (!hasOriginalRuntime) recordRuntime('Stored OCR ready', `${stored.raw.pages.length} pages loaded without an API request.`);
   showRawOcr(stored.raw);
-  showFrontMatterCounts(stored.annotations['front-matter']);
-  showBodyCounts(stored.annotations.body);
-  showReferenceCounts(stored.annotations.references);
+  const annotations = storedAnnotationsForDisplay(stored);
+  showFrontMatterCounts(annotations['front-matter'], stored.authorProfiles);
+  showBodyCounts(annotations.body);
+  showReferenceCounts(annotations.references);
+  state.categoryStates = initialCategoryStates('ready');
+  document.querySelectorAll('[data-count]').forEach((tile) => { applyCategoryTileState(tile.dataset.count); setTileProgress(tile.dataset.count, 100, 'Ready'); });
   note.textContent = 'Stored OCR and source-linked results are loaded locally.';
   fileName.textContent = `${stored.fileName} · ${detail}`;
-  recordRuntime('Stored annotation ready', 'Front matter, body, and references loaded locally.');
+  if (!hasOriginalRuntime) recordRuntime('Stored annotation ready', 'Front matter, body, and references loaded locally.');
+}
+
+function storedAnnotationsForDisplay(stored = {}) {
+  const annotations = stored.annotations || {};
+  const frontMatter = annotations['front-matter'] || {};
+  const hasAbstract = Array.isArray(frontMatter.abstract?.prose_blocks);
+  if (hasAbstract || !Array.isArray(stored.annotationChunks) || !stored.annotationChunks.length) return annotations;
+  const projectedAbstract = projectAnnotationChunks(stored.annotationChunks).annotation.front_matter?.abstract;
+  if (!Array.isArray(projectedAbstract?.prose_blocks)) return annotations;
+  return {
+    ...annotations,
+    'front-matter': {
+      ...frontMatter,
+      abstract: projectedAbstract
+    }
+  };
 }
 async function loadStoredReview(id) {
   if (!['medrxiv', 'chemrxiv', 'eartharxiv', 'researchsquare', 'psyarxiv', 'oraktx'].includes(id)) return;
@@ -210,6 +1772,8 @@ function enableLocalLiveReload() {
 }
 
 input.addEventListener('change', async () => { const file = input.files?.[0]; if (!file) return; try { await upload(file); } catch { toc.textContent = 'The document could not be processed.'; } finally { input.value = ''; } });
+el('#pdfEmptyUploadButton')?.addEventListener('click', () => input.click());
+el('#storedReviewsPdfInput')?.addEventListener('change', async (event) => { const file = event.currentTarget.files?.[0]; if (!file) return; try { window.bootstrap?.Modal.getInstance(el('#storedReviewsModal'))?.hide(); await upload(file); } catch { toc.textContent = 'The document could not be processed.'; } finally { event.currentTarget.value = ''; } });
 pdfMode.addEventListener('click', () => setMode('pdf')); htmlMode.addEventListener('click', () => setMode('html')); htmlMode.addEventListener('animationend', () => htmlMode.classList.remove('is-html-ready'));
 el('#manuscriptSearchToggleButton').addEventListener('click', () => { const control = el('#manuscriptSearchControl'); const open = control.classList.toggle('is-open'); control.setAttribute('aria-hidden', String(!open)); el('#manuscriptSearchToggleButton').setAttribute('aria-expanded', String(open)); if (open) el('#pdfSearchInput').focus(); });
 el('#pdfSearchInput').addEventListener('input', (event) => updateManuscriptSearch(event.target.value));
@@ -221,11 +1785,18 @@ el('#countsToggleButton').addEventListener('click', () => { const collapsed = re
 el('#tocSplitter').addEventListener('pointerdown', (event) => beginResize('toc', event)); el('#countsSplitter').addEventListener('pointerdown', (event) => beginResize('counts', event)); window.addEventListener('pointermove', moveResize); window.addEventListener('pointerup', endResize);
 document.querySelectorAll('.count-tile').forEach((tile) => tile.addEventListener('click', () => openDetails(tile.dataset.count))); el('#detailsPanelClose').addEventListener('click', closeDetails);
 document.querySelectorAll('[data-open-guideline]').forEach((button) => button.addEventListener('click', () => { el('#guidelineDetailName').textContent = button.dataset.openGuideline; el('#guidelineDetailSlider').classList.add('is-open'); })); el('#closeGuidelineDetailSlider').addEventListener('click', () => el('#guidelineDetailSlider').classList.remove('is-open'));
-el('#runtimeSummaryModal').addEventListener('show.bs.modal', renderRuntimeSummary);
+el('#annotationContractModal').addEventListener('show.bs.modal', () => {
+  renderDeveloperDiagnosticsContext();
+  renderAnnotationSourceScope();
+  renderFocusedCitationContract();
+  renderCitationGroundingAudit();
+  renderDocumentQnaDiagnostics();
+  renderRuntimeSummary();
+});
 el('#homeDemoModal').addEventListener('hidden.bs.modal', () => { const video = el('#homeDemoVideo'); video.pause(); video.currentTime = 0; });
 applyPaneWidths();
 new ResizeObserver(schedulePdfRender).observe(el('#centerPane'));
 const storedReview = new URLSearchParams(window.location.search).get('review');
-await initHome({ onUpload: upload, onOpenReview: openHomeReview });
+await initHome({ onUpload: upload, onOpenReview: openHomeReview, onOpenStoredReviews: openStoredReviewsLibrary });
 if (storedReview) openHomeReview(`example:${storedReview}`);
 enableLocalLiveReload();
