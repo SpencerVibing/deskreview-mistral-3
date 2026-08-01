@@ -1,7 +1,7 @@
 import { assertAnnotationPageRange, assertCompactAnnotationFormat } from '../core/mistral-annotation-contract.js';
 import { documentAnnotationFormatForPages, documentAnnotationPromptForPages } from '../core/document-annotation.js';
 import { referenceAnnotationFormat, referenceAnnotationPages, referenceAnnotationPrompt } from '../core/reference-annotation.js';
-import { citationAnnotationFormat, citationAnnotationPrompt } from '../core/citation-annotation.js';
+import { citationAnnotationFormat, citationAnnotationPages, citationAnnotationPrompt } from '../core/citation-annotation.js';
 
 function endpoint(env) { return `${String(env.MISTRAL_BASE_URL || 'https://api.mistral.ai/v1').replace(/\/+$/, '')}/ocr`; }
 
@@ -75,7 +75,8 @@ export function requestReferenceAnnotation({ base64, referenceBlocks, fetchImpl 
 }
 
 /** One bounded body-citation-only annotation request over model-selected article pages. */
-export function requestCitationAnnotation({ base64, pages, fetchImpl = fetch, env = process.env }) {
+export function requestCitationAnnotation({ base64, citationBlocks, fetchImpl = fetch, env = process.env }) {
+  const pages = citationAnnotationPages(citationBlocks);
   assertAnnotationPageRange(pages);
   return postOcr({
     ...sharedRequest(base64, env),
@@ -85,7 +86,7 @@ export function requestCitationAnnotation({ base64, pages, fetchImpl = fetch, en
     extract_header: true,
     extract_footer: true,
     table_format: 'html',
-    document_annotation_format: citationAnnotationFormat,
-    document_annotation_prompt: citationAnnotationPrompt
+    document_annotation_format: citationAnnotationFormat(citationBlocks),
+    document_annotation_prompt: citationAnnotationPrompt(citationBlocks)
   }, { fetchImpl, env });
 }

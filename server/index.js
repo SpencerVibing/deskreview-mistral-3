@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join, relative, resolve } from 'node:path';
-import { annotationChunkPayload, citationAnnotationPayload, displayLinksPayload, MAX_PDF_BYTES, rawOcrPayload, referenceAnnotationPayload, referenceLinksPayload } from './analysis-service.js';
+import { annotationChunkPayload, citationAnnotationPayload, displayLinksPayload, MAX_CITATION_BLOCK_PACKET_BYTES, MAX_PDF_BYTES, rawOcrPayload, referenceAnnotationPayload, referenceLinksPayload } from './analysis-service.js';
 import { lookupAuthorProfiles } from './author-profile-service.js';
 import { createRequestGuard } from './request-guard.js';
 
@@ -9,7 +9,7 @@ const ROOT = resolve(new URL('..', import.meta.url).pathname);
 await loadLocalEnv();
 const PORT = Number(process.env.PORT || 8893);
 const IS_DEVELOPMENT = process.env.NODE_ENV !== 'production';
-const MAX_JSON_BYTES = Math.ceil(MAX_PDF_BYTES * 1.38) + 65536;
+const MAX_JSON_BYTES = Math.ceil(MAX_PDF_BYTES * 1.38) + MAX_CITATION_BLOCK_PACKET_BYTES + 65536;
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.mp4': 'video/mp4', '.pdf': 'application/pdf', '.woff': 'font/woff', '.woff2': 'font/woff2' };
 const roots = [
   { prefix: '/vendor/bootstrap/', path: join(ROOT, 'node_modules/bootstrap/dist') },
@@ -18,7 +18,18 @@ const roots = [
   { prefix: '/core/', path: join(ROOT, 'core') },
   { prefix: '/', path: join(ROOT, 'public') }
 ];
-const DEV_REVISION_FILES = ['public/index.html', 'public/styles.css', 'public/home.js', 'public/app.js', 'public/assets/ambient-paper-v2.svg'];
+const DEV_REVISION_FILES = [
+  'public/index.html',
+  'public/styles.css',
+  'public/home.js',
+  'public/app.js',
+  'public/assets/ambient-paper-v2.svg',
+  'core/citation-annotation.js',
+  'core/reference-links-contract.js',
+  'server/analysis-service.js',
+  'services/mistral-ocr.js',
+  'services/mistral-reference-links.js'
+];
 const requestGuard = createRequestGuard();
 const authorProfileGuard = createRequestGuard({ env: { ...process.env, OCR_RATE_LIMIT_MAX: process.env.AUTHOR_PROFILE_RATE_LIMIT_MAX || '10', OCR_MAX_CONCURRENT: process.env.AUTHOR_PROFILE_MAX_CONCURRENT || '3' }, label: 'author profile' });
 

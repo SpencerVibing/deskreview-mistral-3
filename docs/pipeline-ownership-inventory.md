@@ -34,6 +34,10 @@ prevent future drift and duplicate ownership.
   `services/mistral-ocr.js`
 - Bibliography HTTP orchestration:
   `server/analysis-service.js`
+- Body-citation block selection, schema, prompt, and passive validation:
+  `core/citation-annotation.js`
+- Body-citation provider request and HTTP orchestration:
+  `services/mistral-ocr.js`, `server/analysis-service.js`
 - Document QnA display-link contract:
   `core/display-links-contract.js`
 - Document QnA display-link request owner:
@@ -66,10 +70,11 @@ The psyArXiv failure that motivated the retired reference experiments was:
   raw OCR/stored HTML showed many more references;
 - article-body coverage missed later manuscript text, including the Conclusion.
 
-Bibliography inventory remains deliberately narrow. The broad annotation
-contract independently returns exact body citation occurrences; one bounded
-relation stage maps only those validated occurrence handles to validated
-bibliography handles.
+Bibliography inventory remains deliberately narrow. Broad annotation selects
+article prose blocks but does not extract citations. The separate,
+user-visible body-citation stage returns one block-keyed result per supplied
+article block; one bounded relation stage maps only those validated occurrence
+handles to validated bibliography handles.
 
 ## OCR Scheduling Invariant
 
@@ -87,6 +92,12 @@ timing-dependent provider throttling in which either the reference count or a
 later article range became unavailable. `tests/reader-shell.test.mjs` asserts
 the request order. Do not replace it with `Promise.all` or another concurrent
 OCR scheduler without explicit provider-limit evidence and a regression test.
+
+Focused body-citation extraction depends on complete broad-annotation coverage,
+not on bibliography inventory success. It consumes model-selected article
+block IDs plus immutable raw OCR block text. A bibliography failure must not
+suppress the independent citation audit; it only prevents the final
+citation-to-reference relation request.
 
 ## First Regression Gate
 

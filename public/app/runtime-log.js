@@ -121,7 +121,9 @@ function referenceDependencyFlow(entries) {
       label: 'Bibliography inventory',
       state: inventory ? eventState(inventory) : eventState(count),
       elapsedMs: inventory?.elapsedMs ?? count?.elapsedMs ?? null,
-      detail: Number.isFinite(referenceCount) ? `${referenceCount} individual references available.` : 'No reference inventory event was recorded.'
+      detail: Number.isFinite(referenceCount)
+        ? `${referenceCount} individual references available.`
+        : inventory?.detail || 'No reference inventory event was recorded.'
     },
     {
       label: 'Body citation extraction',

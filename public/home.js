@@ -1,5 +1,6 @@
 import { listReviews, removeReview } from '/review-store.js';
 import { documentAnnotationFormat, documentAnnotationPrompt, documentAnnotationPromptInstructions } from '/core/document-annotation.js';
+import { renderSchemaOverview } from '/app/schema-browser.js';
 
 const examples = [
   { id: 'medrxiv', source: 'medRxiv', year: '2021', title: 'Combined Exercise Training vs Health Education for Older Adults with Hypertension: The HAEL Randomized Clinical Trial', itemCount: 201, rating: 4 },
@@ -13,6 +14,7 @@ const element = (selector) => document.querySelector(selector);
 let homeRevealObserver = null;
 let homeFeatureObserver = null;
 let storedReviewsShortcutHandler = null;
+let pendingReviewDeletion = null;
 
 function isLocalDeveloperEnvironment() {
   return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
@@ -25,124 +27,7 @@ function configureAnnotationContractInspector() {
   const prompt = element('#annotationPromptInstructions');
   const promptRaw = element('#annotationPromptText');
   if (!button || !format || !overview || !prompt || !promptRaw || !isLocalDeveloperEnvironment()) return;
-  const schema = documentAnnotationFormat.json_schema?.schema || {};
-  const fieldType = (value = {}) => {
-    if (value.type === 'array') return `Array · ${value.items?.type || 'value'}`;
-    if (value.type === 'integer') return 'Number';
-    return String(value.type || 'value').replace(/^./, (character) => character.toUpperCase());
-  };
-  const fieldTone = (value = {}) => {
-    const type = value.type === 'array' ? value.items?.type : value.type;
-    if (type === 'string') return 'bg-primary-subtle text-primary-emphasis';
-    if (type === 'integer' || type === 'number') return 'bg-warning-subtle text-warning-emphasis';
-    if (type === 'object') return 'bg-secondary-subtle text-secondary-emphasis';
-    return 'text-bg-light border';
-  };
-  const nestedShape = (field = {}) => field.type === 'array' ? field.items || {} : field;
-  const fieldConstraints = (field = {}) => {
-    const constraints = [];
-    if (Number.isInteger(field.minLength)) constraints.push(`min length ${field.minLength}`);
-    if (Number.isInteger(field.maxLength)) constraints.push(`max length ${field.maxLength}`);
-    if (Number.isInteger(field.minItems)) constraints.push(`min items ${field.minItems}`);
-    if (Number.isInteger(field.maxItems)) constraints.push(`max items ${field.maxItems}`);
-    if (Number.isInteger(field.minimum)) constraints.push(`minimum ${field.minimum}`);
-    if (Number.isInteger(field.maximum)) constraints.push(`maximum ${field.maximum}`);
-    if (Array.isArray(field.enum)) constraints.push(`values: ${field.enum.join(', ')}`);
-    if (field.additionalProperties === false) constraints.push('no additional fields');
-    return constraints;
-  };
-  let accordionIndex = 0;
-  const fieldAccordion = (name, field, path, required = false, group = false) => {
-    const shape = nestedShape(field);
-    const children = Object.entries(shape.properties || {});
-    const requiredChildren = new Set(shape.required || []);
-    const item = document.createElement('div');
-    item.className = `accordion-item annotation-schema-field border rounded-3 overflow-hidden mb-2${group ? ' annotation-schema-group' : ''}`;
-    const heading = document.createElement('h5');
-    heading.className = 'accordion-header';
-    const buttonNode = document.createElement('button');
-    const collapseId = `annotationSchemaField${accordionIndex += 1}`;
-    buttonNode.type = 'button';
-    buttonNode.className = 'accordion-button collapsed py-2 px-3 gap-2';
-    buttonNode.dataset.bsToggle = 'collapse';
-    buttonNode.dataset.bsTarget = `#${collapseId}`;
-    buttonNode.dataset.schemaPath = path;
-    buttonNode.setAttribute('aria-expanded', 'false');
-    buttonNode.setAttribute('aria-controls', collapseId);
-    const label = document.createElement('code');
-    label.className = 'text-body fw-semibold flex-shrink-0';
-    label.textContent = name;
-    const description = document.createElement('span');
-    description.className = 'annotation-schema-description small text-secondary fst-italic text-truncate flex-grow-1 min-w-0';
-    description.textContent = field.description || 'No additional field instructions.';
-    const kind = document.createElement('span');
-    kind.className = `badge fw-normal flex-shrink-0 ${fieldTone(field)}`;
-    kind.textContent = fieldType(field);
-    const badge = document.createElement('span');
-    badge.className = `badge fw-normal flex-shrink-0 ${required ? 'bg-danger-subtle text-danger-emphasis' : 'text-bg-light border text-secondary'}`;
-    badge.textContent = required ? 'Required' : 'Optional';
-    buttonNode.append(label, description, kind, badge);
-    heading.append(buttonNode);
-    const collapse = document.createElement('div');
-    collapse.id = collapseId;
-    collapse.className = 'accordion-collapse collapse';
-    const body = document.createElement('div');
-    body.className = 'accordion-body bg-light-subtle p-3';
-    if (field.description) {
-      const fullDescription = document.createElement('p');
-      fullDescription.className = 'small text-body mb-2';
-      fullDescription.textContent = field.description;
-      body.append(fullDescription);
-    }
-    const constraints = fieldConstraints(field);
-    if (constraints.length) {
-      const constraintRow = document.createElement('div');
-      constraintRow.className = 'd-flex flex-wrap gap-2 mb-3';
-      constraints.forEach((constraint) => {
-        const constraintBadge = document.createElement('span');
-        constraintBadge.className = 'badge text-bg-light border text-secondary fw-normal';
-        constraintBadge.textContent = constraint;
-        constraintRow.append(constraintBadge);
-      });
-      body.append(constraintRow);
-    }
-    if (children.length) {
-      const nested = document.createElement('div');
-      nested.className = 'accordion annotation-schema-children';
-      children.forEach(([childName, child]) => {
-        const childPath = `${path}${field.type === 'array' ? '[]' : ''}.${childName}`;
-        nested.append(fieldAccordion(childName, child, childPath, requiredChildren.has(childName)));
-      });
-      body.append(nested);
-    }
-    const rawWrap = document.createElement('div');
-    rawWrap.className = children.length ? 'mt-2' : '';
-    const rawButton = document.createElement('button');
-    const rawId = `annotationSchemaRaw${accordionIndex += 1}`;
-    rawButton.type = 'button';
-    rawButton.className = 'btn btn-sm btn-link link-secondary text-decoration-none px-0';
-    rawButton.dataset.bsToggle = 'collapse';
-    rawButton.dataset.bsTarget = `#${rawId}`;
-    rawButton.setAttribute('aria-expanded', 'false');
-    rawButton.setAttribute('aria-controls', rawId);
-    rawButton.textContent = 'View this field as JSON';
-    const rawCollapse = document.createElement('div');
-    rawCollapse.id = rawId;
-    rawCollapse.className = 'collapse';
-    const exact = document.createElement('pre');
-    exact.className = 'developer-contract-code border rounded-2 mt-2';
-    exact.dataset.schemaJson = path;
-    exact.textContent = JSON.stringify(field, null, 2);
-    rawCollapse.append(exact);
-    rawWrap.append(rawButton, rawCollapse);
-    body.append(rawWrap);
-    collapse.append(body);
-    item.append(heading, collapse);
-    return item;
-  };
-  Object.entries(schema.properties || {}).forEach(([name, group]) => {
-    overview.append(fieldAccordion(name, group, name, (schema.required || []).includes(name), true));
-  });
+  renderSchemaOverview({ container: overview, format: documentAnnotationFormat, idPrefix: 'annotationSchema' });
   format.textContent = JSON.stringify(documentAnnotationFormat, null, 2);
   documentAnnotationPromptInstructions.forEach((instruction) => {
     const item = document.createElement('li');
@@ -291,7 +176,7 @@ function formatDate(value) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }
 
-function reviewRow(review, onOpen, onDelete) {
+function reviewRow(review, onOpen, onDeleteRequest) {
   const row = document.createElement('tr');
   const authorCount = review.annotations?.['front-matter']?.authors?.length;
   const referenceCount = review.annotations?.references?.references?.length;
@@ -301,9 +186,43 @@ function reviewRow(review, onOpen, onDelete) {
   const countCell = document.createElement('td'); countCell.className = 'text-secondary'; countCell.textContent = counts;
   const stored = document.createElement('td'); stored.className = 'text-secondary text-nowrap'; stored.textContent = formatDate(review.savedAt);
   const actions = document.createElement('td'); actions.className = 'text-end'; const group = document.createElement('div'); group.className = 'btn-group btn-group-sm'; const open = document.createElement('button'); open.type = 'button'; open.className = 'btn btn-light border'; open.textContent = 'Open'; const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-light border'; remove.setAttribute('aria-label', 'Delete stored review'); remove.innerHTML = '<i class="bi bi-trash3" aria-hidden="true"></i>'; group.append(open, remove); actions.append(group);
-  name.addEventListener('click', () => onOpen(review.id)); open.addEventListener('click', () => onOpen(review.id)); remove.addEventListener('click', () => onDelete(review.id));
+  name.addEventListener('click', () => onOpen(review.id)); open.addEventListener('click', () => onOpen(review.id)); remove.addEventListener('click', () => onDeleteRequest(review));
   row.append(manuscript, pages, countCell, stored, actions);
   return row;
+}
+
+function requestStoredReviewDeletion(review, onOpenReview) {
+  const libraryElement = element('#storedReviewsModal');
+  const confirmationElement = element('#deleteStoredReviewModal');
+  if (!libraryElement || !confirmationElement) return;
+  pendingReviewDeletion = { review, onOpenReview };
+  element('#deleteStoredReviewName').textContent = review.fileName || 'Untitled manuscript';
+  element('#deleteStoredReviewError')?.classList.add('d-none');
+  const showConfirmation = () => window.bootstrap?.Modal.getOrCreateInstance(confirmationElement)?.show();
+  if (libraryElement.classList.contains('show')) {
+    libraryElement.addEventListener('hidden.bs.modal', showConfirmation, { once: true });
+    window.bootstrap?.Modal.getOrCreateInstance(libraryElement)?.hide();
+  } else {
+    showConfirmation();
+  }
+}
+
+async function confirmStoredReviewDeletion() {
+  const pending = pendingReviewDeletion;
+  const button = element('#confirmDeleteStoredReviewButton');
+  const error = element('#deleteStoredReviewError');
+  if (!pending || !button) return;
+  button.disabled = true;
+  error?.classList.add('d-none');
+  try {
+    await removeReview(pending.review.id);
+    await refreshHome({ onOpenReview: pending.onOpenReview });
+    window.bootstrap?.Modal.getOrCreateInstance(element('#deleteStoredReviewModal'))?.hide();
+  } catch {
+    error?.classList.remove('d-none');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function updateStoredReviewsShortcut(count = 0) {
@@ -326,13 +245,14 @@ export async function refreshHome({ onOpenReview }) {
   rows.forEach((review) => body?.append(reviewRow(review, (id) => {
     window.bootstrap?.Modal.getInstance(element('#storedReviewsModal'))?.hide();
     onOpenReview(id);
-  }, async (id) => { await removeReview(id); await refreshHome({ onOpenReview }); })));
+  }, (item) => requestStoredReviewDeletion(item, onOpenReview))));
 }
 
 export async function initHome({ onUpload, onOpenReview, onOpenStoredReviews }) {
   const input = element('#homePdfInput');
   const list = element('#exampleManuscriptList');
   const storedReviewsShortcut = element('#homeStoredReviewsButton');
+  const deleteConfirmation = element('#deleteStoredReviewModal');
   storedReviewsShortcutHandler = onOpenStoredReviews;
   configureAnnotationContractInspector();
   list.replaceChildren(...examples.map((example, index) => exampleCard(example, onOpenReview, index)));
@@ -348,5 +268,11 @@ export async function initHome({ onUpload, onOpenReview, onOpenStoredReviews }) 
   initHomeAnchorLinks();
   initUspComparison();
   element('#storedReviewsModal')?.addEventListener('show.bs.modal', () => { refreshHome({ onOpenReview }).catch(() => {}); });
+  element('#confirmDeleteStoredReviewButton')?.addEventListener('click', () => { confirmStoredReviewDeletion().catch(() => {}); });
+  deleteConfirmation?.addEventListener('hidden.bs.modal', () => {
+    if (!pendingReviewDeletion) return;
+    pendingReviewDeletion = null;
+    window.bootstrap?.Modal.getOrCreateInstance(element('#storedReviewsModal'))?.show();
+  });
   await refreshHome({ onOpenReview });
 }

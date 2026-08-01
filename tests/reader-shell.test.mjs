@@ -52,8 +52,33 @@ const annotationChunk = {
 };
 const referenceResult = {
   pages: [1],
-  references: [{ id: 'ref-1', text: 'Example reference.', source: source(1, 1, 'Example reference.') }, { id: 'ref-2', text: 'Second reference.', source: source(1, 1, 'Second reference.') }]
+  coverage: { sourceCharacters: 39, returnedCharacters: 39, ratio: 1, percent: 100 },
+  references: [{ id: 'ref-1', printed_label: '1.', text: 'Example reference.' }, { id: 'ref-2', printed_label: '2.', text: 'Second reference.' }]
 };
+function citationResultFromRequest(route) {
+  const request = JSON.parse(route.request().postData() || '{}');
+  const citationBlocks = (request.citationBlocks || []).map((block) => ({
+    ocr_page_id: block.pageId,
+    ocr_block_id: block.blockId,
+    citation_mentions: String(block.text || '').includes('[1]')
+      ? [{ citation_text: '[1]' }]
+      : []
+  }));
+  return {
+    pages: [...new Set((request.citationBlocks || []).map((block) => block.pageIndex))],
+    citationBlocks,
+    citationMentions: citationBlocks.flatMap((block) => block.citation_mentions.map(({ citation_text: citationText, ...mention }) => ({
+      ...mention,
+      label: citationText,
+      context_quote: String((request.citationBlocks || []).find((sourceBlock) => sourceBlock.blockId === block.ocr_block_id)?.text || citationText),
+      source: {
+        ocr_page_id: block.ocr_page_id,
+        ocr_block_id: block.ocr_block_id,
+        exact_quote: citationText
+      }
+    })))
+  };
+}
 const ocrRequestOrder = [];
 await page.route('**/api/ocr/**', async (route) => {
   const url = route.request().url();
@@ -61,7 +86,7 @@ await page.route('**/api/ocr/**', async (route) => {
   if (url.endsWith('/raw')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(raw) });
   if (url.endsWith('/annotate')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pages: [0, 1], ocrPages: [{ markdown: 'changed annotation OCR page', blocks: [{ type: 'text', content: 'changed annotation OCR page' }] }], annotation: annotationChunk }) });
   if (url.endsWith('/references')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(referenceResult) });
-  if (url.endsWith('/citations')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pages: [0], annotation: { citation_mentions: [{ label: '[1]', context_quote: 'Prior work supports this finding [1].' }] } }) });
+  if (url.endsWith('/citations')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(citationResultFromRequest(route)) });
   if (url.endsWith('/display-links')) {
     const body = JSON.parse(route.request().postData() || '{}');
     assert.equal(body.base64, undefined, 'Source links must use validated candidates, not the PDF.');
@@ -77,8 +102,7 @@ await page.route('**/api/ocr/**', async (route) => {
     assert.equal(body.base64, undefined, 'Reference links must use validated handles, not the PDF.');
     const candidates = body.candidates || {};
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ links: {
-      citation_mappings: [{ citation_handle: candidates.citation_mentions[0].handle, reference_handles: [candidates.references[0].handle] }],
-      unmatched_citation_handles: []
+      citation_decisions: [{ citation_handle: candidates.citation_mentions[0].handle, classification: 'bibliographic_citation', reference_handles: [candidates.references[0].handle] }]
     } }) });
   }
   throw new Error(`Unexpected OCR route: ${url}`);
@@ -124,33 +148,73 @@ await page.getByText('medrxiv.pdf · stored example', { exact: true }).waitFor({
 await page.locator('#annotationContractButton').waitFor({ state: 'visible' });
 await page.locator('#annotationContractButton').click();
 await page.locator('#annotationContractModal.show').waitFor({ state: 'visible' });
+assert.equal(await page.locator('[data-diagnostics-purpose]').count(), 6);
+assert.equal(await page.locator('[data-diagnostics-purpose]').evaluateAll((items) => items.every((item) => item.children.length === 2 && [...item.children].every((child) => getComputedStyle(child).display === 'block'))), true);
+assert.match(await page.locator('[data-diagnostics-purpose="source-scope"]').textContent(), /raw OCR pages and blocks/i);
+assert.match(await page.locator('[data-diagnostics-purpose="annotation-contract"]').textContent(), /JSON Schema and document-level instructions/i);
+assert.match(await page.locator('[data-diagnostics-purpose="bibliography-inventory"]').textContent(), /individual reference-list entries/i);
+assert.match(await page.locator('[data-diagnostics-purpose="bibliography-inventory"]').textContent(), /stable HTML target/i);
+assert.match(await page.locator('[data-diagnostics-purpose="body-citations"]').textContent(), /in-text citations in the article body/i);
+assert.match(await page.locator('[data-diagnostics-purpose="document-qna"]').textContent(), /maps bibliography entries to body citations/i);
+assert.match(await page.locator('[data-diagnostics-purpose="runtime-summary"]').textContent(), /stage timing, dependencies, failures/i);
 assert.match(await page.locator('#annotationFormatCode').textContent(), /deskreview_document_annotation_v16/);
 assert.doesNotMatch(await page.locator('#annotationFormatCode').textContent(), /reference_audit/);
 assert.match(await page.locator('#annotationPromptText').textContent(), /Return only visible information/);
 assert.equal(await page.locator('#annotationFormatOverview > .annotation-schema-group').count(), 3);
 await page.locator('#annotationContractTab').click();
 await page.locator('[data-schema-path="front_matter"]').click();
-await page.locator('[data-schema-path="front_matter.authors"]').waitFor({ state: 'visible' });
-assert.match(await page.locator('[data-schema-path="front_matter.authors"]').textContent(), /Every visible human byline author/);
-assert.match(await page.locator('[data-schema-path="front_matter.authors"]').textContent(), /Array · object/);
-assert.match(await page.locator('[data-schema-path="front_matter.authors"]').textContent(), /Required/);
-await page.locator('[data-schema-path="front_matter.authors"]').click();
-await page.locator('[data-schema-path="front_matter.authors[].label"]').waitFor({ state: 'visible' });
-assert.match(await page.locator('[data-schema-path="front_matter.authors[].label"]').textContent(), /One author name copied verbatim/);
+const authorsSchemaButton = page.locator('[data-schema-path="front_matter.authors"]');
+await authorsSchemaButton.waitFor({ state: 'visible' });
+assert.doesNotMatch(await authorsSchemaButton.textContent(), /Every visible human byline author/);
+assert.match(await authorsSchemaButton.locator('xpath=../..').textContent(), /Every visible human byline author/);
+assert.match(await authorsSchemaButton.textContent(), /Array · object/);
+assert.match(await authorsSchemaButton.textContent(), /Required/);
+await authorsSchemaButton.click();
+const authorLabelSchemaButton = page.locator('[data-schema-path="front_matter.authors[].label"]');
+await authorLabelSchemaButton.waitFor({ state: 'visible' });
+assert.doesNotMatch(await authorLabelSchemaButton.textContent(), /One author name copied verbatim/);
+assert.match(await authorLabelSchemaButton.locator('xpath=../..').textContent(), /One author name copied verbatim/);
 assert.equal(await page.locator('#annotationPromptInstructions > li').count(), 3);
 await page.locator('#annotationSourceTab').click();
-assert.match(await page.locator('#annotationSourceScopeSummary').textContent(), /source scopes identified/);
+assert.equal(await page.locator('#annotationSourceScopeSummary').count(), 0);
 assert.equal(await page.locator('#annotationSourceScopeList > .accordion-item').count(), 9);
 assert.deepEqual(
   await page.locator('#annotationSourceScopeList > .accordion-item').evaluateAll((items) => items.map((item) => item.dataset.sourceScope)),
   ['title', 'authors', 'affiliations', 'abstract', 'keywords', 'article', 'tables', 'figures', 'references']
 );
 assert.equal(await page.locator('[data-source-scope="references"] .list-group-item').count(), 22);
+assert.match(await page.locator('[data-source-scope="references"] [data-source-scope-count]').textContent(), /OCR blocks/);
+assert.doesNotMatch(await page.locator('[data-source-scope="references"] [data-source-scope-count]').textContent(), /sources/);
 assert.match(await page.locator('#annotationCombinedReferenceText').textContent(), /ocr-block-/);
+await page.locator('#referenceInventoryTab').click();
+assert.match(await page.locator('#referenceAnnotationFormatCode').textContent(), /deskreview_reference_annotation_v7/);
+assert.equal(await page.locator('#referenceAnnotationFormatOverview > .annotation-schema-group').count(), 1);
+assert.equal(await page.locator('#referenceAnnotationFormatOverview .annotation-schema-description').count(), 0);
+assert.match(await page.locator('#referenceAnnotationPromptInstructions').textContent(), /authoritative raw OCR references blocks/);
+assert.match(await page.locator('#referenceInventoryMetrics').textContent(), /22\s*Individual references/);
+assert.match(await page.locator('[data-reference-inventory-flow]').textContent(), /Raw OCR bibliography scope/);
+assert.match(await page.locator('[data-reference-inventory-flow]').textContent(), /Passive contract check/);
+assert.match(await page.locator('#referenceInventoryStatus').textContent(), /stable HTML target/i);
+assert.doesNotMatch(await page.locator('#referenceInventoryStatus').textContent(), /source anchor|reference-list passage/i);
+assert.match(await page.locator('#referenceInventoryStatus').textContent(), /22 individual references were returned/);
+assert.equal(await page.locator('#referenceInventoryAudit table').count(), 1);
+assert.equal(await page.locator('[data-reference-audit-item]').count(), 22);
+assert.equal(await page.locator('#referenceInventoryPane').evaluate((pane) => {
+  const audit = pane.querySelector('#referenceInventoryAudit');
+  const contract = audit?.nextElementSibling;
+  return Boolean(contract?.classList.contains('border-top'));
+}), true, 'Bibliography technical contract must follow the extraction audit.');
 await page.locator('#bodyCitationsTab').click();
-assert.match(await page.locator('#citationAnnotationFormatCode').textContent(), /deskreview_body_citations_v1/);
-assert.match(await page.locator('#citationGroundingAuditMetrics').textContent(), /Returned/);
+assert.match(await page.locator('#citationAnnotationFormatOverview').textContent(), /stored review did not retain that packet/i);
+assert.equal(await page.locator('#citationAnnotationFormatRaw.show').count(), 0);
+assert.match(await page.locator('#citationAnnotationPromptText').textContent(), /not retained for this stored review/i);
+assert.match(await page.locator('#citationGroundingAuditMetrics').textContent(), /Citation mentions found/);
 assert.match(await page.locator('#citationGroundingAudit').textContent(), /No focused body-citation extraction ranges are available/);
+assert.equal(await page.locator('#bodyCitationsPane').evaluate((pane) => {
+  const audit = pane.querySelector('#citationGroundingAudit');
+  const contract = audit?.nextElementSibling;
+  return Boolean(contract?.classList.contains('border-top'));
+}), true, 'Body-citation technical contract must follow the extraction audit.');
 await page.locator('#documentQnaTab').click();
 assert.match(await page.locator('#documentQnaOverview').textContent(), /Reference relations/);
 await page.locator('#runtimeSummaryTab').click();
@@ -172,6 +236,11 @@ await page.evaluate(() => {
   document.querySelector('#reader')?.classList.remove('d-none');
 });
 await page.locator('#pdfEmptyUploadButton').filter({ hasText: 'Upload PDF' }).waitFor({ state: 'visible' });
+assert.equal(await page.locator('#tocList .toc-pending').count(), 0, 'The empty reader must not imply that ToC processing has started.');
+assert.ok(
+  Number.parseFloat(await page.locator('#pdfEmptyUploadButton i').evaluate((node) => getComputedStyle(node).fontSize)) < 20,
+  'The empty-state upload icon must retain normal button proportions.'
+);
 await page.goto(baseUrl);
 await page.locator('#pdfInput').setInputFiles({ name: 'fixture.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF') });
 await page.locator('.toc-button').first().waitFor({ state: 'visible' });
@@ -186,7 +255,7 @@ assert.equal(await page.locator('[data-count="authors"]').evaluate((el) => el.cl
 assert.equal(await page.locator('[data-count="references"]').getAttribute('data-category-state'), 'ready');
 assert.equal(await page.locator('[data-count="references"]').getAttribute('data-link-state'), 'ready');
 assert.equal(await page.locator('[data-count="article"]').getAttribute('data-category-state'), 'ready');
-assert.deepEqual(ocrRequestOrder.slice(0, 3), ['raw', 'references', 'annotate'], 'Reference inventory starts immediately beside the first broad annotation range.');
+assert.deepEqual(ocrRequestOrder.slice(0, 3), ['raw', 'annotate', 'references'], 'Reference inventory starts only after the first broad annotation range completes.');
 assert.equal(await page.locator('#htmlMode.is-html-ready').count(), 1);
 assert.equal(await page.locator('.ocr-html strong').getByText('Paper title', { exact: true }).count(), 1);
 assert.equal(await page.locator('.ocr-html table').count(), 1);
@@ -223,7 +292,7 @@ assert.equal(await page.locator('.source-target-highlight').count(), 1);
 assert.equal(await page.locator('.source-target-highlight').textContent(), 'Example reference.');
 assert.equal(await page.locator('.ocr-reference-list li').count(), 2, 'Reference rendering does not change the reference count.');
 assert.equal(await page.locator('#detailsPanelBody').getByText('1 occurrence in the body text', { exact: true }).count(), 1);
-assert.equal(await page.locator('#detailsPanelBody').getByText('Prior work supports this finding [1].', { exact: true }).count(), 1);
+assert.equal(await page.locator('#detailsPanelBody').getByText('Results are presented in Table 1. Figure 1 illustrates the outcome. Prior work supports this finding [1].', { exact: true }).count(), 1);
 await page.locator('#detailsPanelBody .detail-occurrence-jump').click();
 assert.equal(await page.locator('.source-target-highlight').textContent(), '[1]');
 await page.locator('#detailsPanelClose').click();
@@ -297,6 +366,20 @@ assert.equal(await libraryPage.locator('#runtimeSummarySections').getByText('Upl
 assert.equal(await libraryPage.locator('#runtimeSummarySections').getByText('Stored review opened', { exact: true }).count(), 0);
 assert.equal(await libraryPage.locator('#runtimeSummarySections').getByText('Stored OCR ready', { exact: true }).count(), 0);
 await hideModal(libraryPage, '#annotationContractModal');
+await libraryPage.locator('#storedReviewsButton').click();
+await libraryPage.locator('#storedReviewsModal.show').waitFor({ state: 'visible' });
+await libraryPage.locator('#reviewLibraryBody button[aria-label="Delete stored review"]').click();
+await libraryPage.locator('#deleteStoredReviewModal.show').waitFor({ state: 'visible' });
+assert.equal(await libraryPage.locator('#storedReviewsModal').evaluate((node) => node.classList.contains('show')), false);
+assert.equal(await libraryPage.locator('#deleteStoredReviewName').textContent(), 'fixture.pdf');
+await libraryPage.locator('#deleteStoredReviewModal').getByRole('button', { name: 'Cancel' }).click();
+await libraryPage.locator('#storedReviewsModal.show').waitFor({ state: 'visible' });
+assert.equal(await libraryPage.locator('#reviewLibraryBody').getByText('fixture.pdf', { exact: true }).count(), 1);
+await libraryPage.locator('#reviewLibraryBody button[aria-label="Delete stored review"]').click();
+await libraryPage.locator('#deleteStoredReviewModal.show').waitFor({ state: 'visible' });
+await libraryPage.locator('#confirmDeleteStoredReviewButton').click();
+await libraryPage.locator('#storedReviewsModal.show').waitFor({ state: 'visible' });
+assert.equal(await libraryPage.locator('#reviewLibraryBody').getByText('fixture.pdf', { exact: true }).count(), 0);
 await libraryPage.close();
 const storedPage = await context.newPage();
 await storedPage.route('**/api/ocr/**', (route) => route.abort());
@@ -305,7 +388,7 @@ await storedPage.getByText('medrxiv.pdf · stored example', { exact: true }).wai
 assert.equal(await storedPage.locator('[data-count="authors"] strong').textContent(), '23');
 assert.equal(await storedPage.locator('.toc-button').filter({ hasText: /^Title$/ }).count(), 1);
 assert.equal(await storedPage.locator('[data-count="references"] strong').textContent(), '22');
-assert.equal(await storedPage.locator('.ocr-reference-list li').count(), 0, 'Stale stored anchors outside the cached OCR page range fail closed.');
+assert.equal(await storedPage.locator('.ocr-reference-list li').count(), 22, 'Stored references render as individual HTML targets without depending on legacy source anchors.');
 await storedPage.locator('#pdfCanvasHost canvas').first().waitFor({ state: 'visible', timeout: 30000 });
 assert.equal(await storedPage.locator('#pdfFrame').count(), 0);
 await storedPage.locator('.pdf-page[data-page="5"]').waitFor({ state: 'attached', timeout: 30000 });
@@ -337,7 +420,12 @@ assert.ok(await storedPage.locator('#runtimeSummarySections time').first().textC
 await hideModal(storedPage, '#annotationContractModal');
 await storedPage.locator('[data-count="references"]').click();
 assert.equal(await storedPage.locator('#detailsPanelBody').getByText('Open source in HTML', { exact: true }).count(), 0);
-assert.equal(await storedPage.locator('#detailsPanelBody .detail-source-unavailable').count(), 22);
+assert.equal(await storedPage.locator('#detailsPanelBody .detail-source-unavailable').count(), 0);
+assert.equal(await storedPage.locator('#detailsPanelBody .detail-jump').count(), 22);
+await storedPage.locator('#detailsPanelBody .detail-jump').first().click();
+assert.equal(await storedPage.locator('#htmlPane').evaluate((node) => !node.classList.contains('d-none')), true);
+assert.equal(await storedPage.locator('.ocr-reference-list li.ocr-reference-target').count(), 1);
+assert.equal(await storedPage.locator('.ocr-reference-list li').first().getAttribute('id'), 'reference-target-1');
 await storedPage.locator('#detailsPanelClose').click();
 await storedPage.locator('#pdfMode').click();
 await storedPage.locator('#pdfCanvasHost canvas').first().waitFor({ state: 'visible', timeout: 30000 });
@@ -357,7 +445,7 @@ await oraktxPage.goto(`${baseUrl}?review=oraktx`);
 await oraktxPage.getByText('ORAKTx.pdf · stored example', { exact: true }).waitFor({ state: 'visible' });
 assert.equal(await oraktxPage.locator('[data-count="keywords"] strong').textContent(), '6');
 assert.equal(await oraktxPage.locator('[data-count="references"] strong').textContent(), '31');
-assert.equal(await oraktxPage.locator('.ocr-reference-list li').count(), 0, 'Legacy ORAKTx reference anchors fail closed instead of rewriting cached OCR.');
+assert.equal(await oraktxPage.locator('.ocr-reference-list li').count(), 31, 'Stored ORAKTx references render as individual HTML targets without legacy anchors.');
 await oraktxPage.close();
 const chemrxivPage = await context.newPage();
 await chemrxivPage.route('**/api/ocr/**', (route) => route.abort());
@@ -386,14 +474,13 @@ await linkFailurePage.route('**/api/ocr/**', async (route) => {
   if (url.endsWith('/raw')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(raw) });
   if (url.endsWith('/annotate')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pages: [0, 1], annotation: annotationChunk }) });
   if (url.endsWith('/references')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(referenceResult) });
-  if (url.endsWith('/citations')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pages: [0], annotation: { citation_mentions: [{ label: '[1]', context_quote: 'Prior work supports this finding [1].' }] } }) });
+  if (url.endsWith('/citations')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(citationResultFromRequest(route)) });
   if (url.endsWith('/display-links')) return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: 'Linking unavailable.' }) });
   if (url.endsWith('/reference-links')) {
     const body = JSON.parse(route.request().postData() || '{}');
     const candidates = body.candidates || {};
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ links: {
-      citation_mappings: [{ citation_handle: candidates.citation_mentions[0].handle, reference_handles: [candidates.references[0].handle] }],
-      unmatched_citation_handles: []
+      citation_decisions: [{ citation_handle: candidates.citation_mentions[0].handle, classification: 'bibliographic_citation', reference_handles: [candidates.references[0].handle] }]
     } }) });
   }
   throw new Error(`Unexpected OCR route: ${url}`);
@@ -409,6 +496,120 @@ assert.equal(await linkFailurePage.locator('[data-count="tables"]').getAttribute
 await linkFailurePage.locator('[data-count="references"]').click();
 assert.equal(await linkFailurePage.locator('#detailsPanelBody').getByText('1 occurrence in the body text', { exact: true }).count(), 1);
 await linkFailurePage.close();
+const citationValidationPage = await context.newPage();
+let referenceLinksRequestedAfterCitationValidationFailure = false;
+await citationValidationPage.route('**/api/author-profiles', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ source: 'openalex', authors: [] }) }));
+await citationValidationPage.route('**/api/ocr/**', async (route) => {
+  const url = route.request().url();
+  if (url.endsWith('/raw')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(raw) });
+  if (url.endsWith('/annotate')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pages: [0, 1], annotation: annotationChunk }) });
+  if (url.endsWith('/references')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(referenceResult) });
+  if (url.endsWith('/citations')) {
+    const successful = citationResultFromRequest(route);
+    const validMention = successful.citationMentions[0];
+    const invalidMention = { label: '2', context_quote: 'not-in-source', source: { ...validMention.source, exact_quote: 'not-in-source' } };
+    successful.citationBlocks[0].citation_mentions.push({ citation_text: '2' });
+    return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({
+      error: 'Mistral returned ungrounded body citation details.',
+      issues: ['Citation 2 has citation text that is not present in its declared OCR block.'],
+      diagnostics: { pages: successful.pages, citationBlocks: successful.citationBlocks, citationMentions: [validMention, invalidMention] }
+    }) });
+  }
+  if (url.endsWith('/display-links')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ links: { display_mappings: [], unmatched_display_mentions: [], unmentioned_display_handles: [] }, complete: true }) });
+  if (url.endsWith('/reference-links')) {
+    referenceLinksRequestedAfterCitationValidationFailure = true;
+    const candidates = JSON.parse(route.request().postData() || '{}').candidates;
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ links: {
+      citation_decisions: [{ citation_handle: candidates.citation_mentions[0].handle, classification: 'bibliographic_citation', reference_handles: [candidates.references[0].handle] }]
+    } }) });
+  }
+  throw new Error(`Unexpected OCR route: ${url}`);
+});
+await citationValidationPage.goto(baseUrl);
+await citationValidationPage.locator('#pdfInput').setInputFiles({ name: 'citation-validation.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF') });
+await citationValidationPage.getByText('fixture.pdf · review results ready', { exact: true }).waitFor({ state: 'visible' });
+assert.equal(await citationValidationPage.locator('[data-count="references"] strong').textContent(), '2');
+assert.equal(referenceLinksRequestedAfterCitationValidationFailure, true, 'Independently grounded citation occurrences proceed to relation mapping.');
+await citationValidationPage.locator('#annotationContractButton').click();
+await citationValidationPage.locator('#annotationContractModal.show').waitFor({ state: 'visible' });
+await citationValidationPage.locator('#bodyCitationsTab').click();
+assert.match(await citationValidationPage.locator('#citationGroundingAuditMetrics').textContent(), /2\s*Citation mentions found/);
+assert.match(await citationValidationPage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*Source verified/);
+assert.match(await citationValidationPage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*Could not verify/);
+assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /Source verification failed/);
+assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /Citation mentions found is the number of individual in-text citation occurrences/i);
+assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /complete OCR block is retained as context/i);
+assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /Document QnA can then map each source-verified occurrence/i);
+await citationValidationPage.locator('#documentQnaTab').click();
+assert.match(await citationValidationPage.locator('#documentQnaOverview').textContent(), /Reference relations/i);
+await citationValidationPage.close();
+const referenceFailurePage = await context.newPage();
+let referenceLinksRequestedAfterInventoryFailure = false;
+await referenceFailurePage.route('**/api/author-profiles', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ source: 'openalex', authors: [] }) }));
+await referenceFailurePage.route('**/api/ocr/**', async (route) => {
+  const url = route.request().url();
+  if (url.endsWith('/raw')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(raw) });
+  if (url.endsWith('/annotate')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pages: [0, 1], annotation: annotationChunk }) });
+  if (url.endsWith('/references')) return route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({
+    error: 'Reference inventory unavailable in fixture.',
+    issues: [
+      'Reference block result 1 declares an unknown OCR block.',
+      'Reference block ocr-block-1-1 is missing from the response.',
+      'Reference 1 has no text.'
+    ],
+    diagnostics: {
+      pages: [1],
+      referenceBlocks: [{ ocr_page_id: 'ocr-page-1', ocr_block_id: 'unknown-block', references: [] }],
+      references: referenceResult.references
+    }
+  }) });
+  if (url.endsWith('/citations')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify(citationResultFromRequest(route)) });
+  if (url.endsWith('/display-links')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ links: { display_mappings: [], unmatched_display_mentions: [], unmentioned_display_handles: [] }, complete: true }) });
+  if (url.endsWith('/reference-links')) {
+    referenceLinksRequestedAfterInventoryFailure = true;
+    return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Reference linking must not run without an inventory.' }) });
+  }
+  throw new Error(`Unexpected OCR route: ${url}`);
+});
+await referenceFailurePage.goto(baseUrl);
+await referenceFailurePage.locator('#pdfInput').setInputFiles({ name: 'reference-failure.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF') });
+await referenceFailurePage.getByText('fixture.pdf · review results ready', { exact: true }).waitFor({ state: 'visible' });
+assert.equal(await referenceFailurePage.locator('[data-count="references"] strong').textContent(), '—');
+assert.equal(await referenceFailurePage.locator('[data-count="references"]').getAttribute('data-category-state'), 'unavailable');
+assert.equal(referenceLinksRequestedAfterInventoryFailure, false, 'Reference linking must not run without a bibliography inventory.');
+await referenceFailurePage.locator('#annotationContractButton').click();
+await referenceFailurePage.locator('#annotationContractModal.show').waitFor({ state: 'visible' });
+await referenceFailurePage.locator('#referenceInventoryTab').click();
+assert.match(await referenceFailurePage.locator('#referenceInventoryMetrics').textContent(), /2\s*Individual references/);
+assert.match(await referenceFailurePage.locator('#referenceInventoryMetrics').textContent(), /3\s*Contract issues/);
+assert.match(await referenceFailurePage.locator('#referenceInventoryAudit').textContent(), /Example reference/);
+assert.equal(await referenceFailurePage.locator('[data-reference-audit-item]').count(), 2);
+await referenceFailurePage.locator('#bodyCitationsTab').click();
+assert.match(await referenceFailurePage.locator('#citationAnnotationFormatCode').textContent(), /deskreview_body_citations_v10/);
+assert.equal(await referenceFailurePage.locator('#citationAnnotationFormatOverview > .annotation-schema-group').count(), 1);
+await referenceFailurePage.locator('#citationAnnotationFormatOverview [data-schema-path="citation_blocks"]').click();
+await referenceFailurePage.locator('#citationAnnotationFormatOverview [data-schema-path="citation_blocks[].citation_mentions"]').click();
+await referenceFailurePage.locator('#citationAnnotationFormatOverview [data-schema-path="citation_blocks[].citation_mentions[].citation_text"]').waitFor({ state: 'visible' });
+assert.match(await referenceFailurePage.locator('#citationAnnotationFormatOverview [data-schema-path="citation_blocks"]').locator('xpath=../..').textContent(), /one result for every supplied raw OCR article block/i);
+assert.match(await referenceFailurePage.locator('#citationAnnotationFormatOverview [data-schema-path="citation_blocks[].citation_mentions[].citation_text"]').locator('xpath=../..').textContent(), /copied character-for-character.*raw OCR block/i);
+assert.match(await referenceFailurePage.locator('#citationAnnotationPromptText').textContent(), /AUTHORITATIVE RAW OCR ARTICLE BLOCKS/);
+assert.match(await referenceFailurePage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*Citation mentions found/);
+assert.match(await referenceFailurePage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*Source verified/);
+assert.equal(await referenceFailurePage.locator('#citationGroundingAudit table').count(), 1);
+assert.match(await referenceFailurePage.locator('#citationGroundingAudit thead').textContent(), /Article-text blocks/);
+assert.match(await referenceFailurePage.locator('#citationGroundingAudit tbody > tr').first().textContent(), /1 checked/);
+assert.doesNotMatch(await referenceFailurePage.locator('#citationGroundingAudit tbody > tr').first().textContent(), /1\/1/);
+assert.equal(await referenceFailurePage.locator('[data-citation-audit-toggle]').count(), 1);
+await referenceFailurePage.locator('[data-citation-audit-toggle]').click();
+await referenceFailurePage.locator('#citationGroundingAudit .collapse.show').waitFor({ state: 'visible' });
+assert.equal(await referenceFailurePage.locator('[data-citation-audit-block]').count(), 1);
+assert.match(await referenceFailurePage.locator('#citationGroundingAudit').textContent(), /Page 1 · block 7/);
+assert.match(await referenceFailurePage.locator('#citationGroundingAudit').textContent(), /Prior work supports this finding \[1\]\./);
+assert.match(await referenceFailurePage.locator('#citationGroundingAudit').textContent(), /View supplied OCR block text/);
+assert.doesNotMatch(await referenceFailurePage.locator('#citationGroundingAudit').textContent(), /ocr-block-0-6/);
+await referenceFailurePage.locator('#runtimeSummaryTab').click();
+assert.match(await referenceFailurePage.locator('#runtimeSummarySections').textContent(), /Reference inventory unavailable in fixture/);
+await referenceFailurePage.close();
 const chunkFailurePage = await context.newPage();
 const chunkFailureRaw = {
   fileName: 'chunk-failure.pdf',
@@ -450,7 +651,7 @@ await chunkFailurePage.route('**/api/ocr/**', async (route) => {
   }
   if (url.endsWith('/references')) {
     chunkFailureOrder.push('references');
-    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pages: [16], references: [{ id: 'late-reference', text: 'Late reference.', source: source(16, 1, 'Late reference.') }] }) });
+    return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ pages: [16], references: [{ id: 'late-reference', printed_label: '', text: 'Late reference.', source: source(16, 1, 'Late reference.') }] }) });
   }
   if (url.endsWith('/display-links')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ links: { display_mappings: [], unmatched_display_mentions: [], unmentioned_display_handles: [] }, complete: true }) });
   throw new Error(`Unexpected OCR route: ${url}`);
@@ -458,7 +659,7 @@ await chunkFailurePage.route('**/api/ocr/**', async (route) => {
 await chunkFailurePage.goto(baseUrl);
 await chunkFailurePage.locator('#pdfInput').setInputFiles({ name: 'chunk-failure.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF') });
 await chunkFailurePage.getByText('chunk-failure.pdf · review results ready', { exact: true }).waitFor({ state: 'visible' });
-assert.deepEqual(chunkFailureOrder.slice(0, 4), ['raw', 'references', 'annotate:0', 'annotate:8']);
+assert.deepEqual(chunkFailureOrder.slice(0, 4), ['raw', 'annotate:0', 'references', 'annotate:8']);
 assert.equal(await chunkFailurePage.locator('[data-count="references"] strong').textContent(), '1', 'Reference inventory completes independently when a broad annotation range fails.');
 assert.equal(await chunkFailurePage.locator('[data-count="article"] strong').textContent(), '—', 'Article count is not finalized when an annotation range failed.');
 assert.equal(await chunkFailurePage.locator('[data-count="references"]').getAttribute('data-category-state'), 'counted');

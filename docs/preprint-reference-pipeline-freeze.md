@@ -1,8 +1,9 @@
-# psyArXiv Reference Pipeline Freeze
+# Preprint Reference Pipeline Freeze
 
-Status: accepted regression baseline on 2026-07-30.
+Status: expanded regression baseline on 2026-07-31.
 
-This checkpoint protects the reference path that was verified with
+This checkpoint protects the reference path across all five stored preprint
+fixtures and retains the live psyArXiv relation evidence verified with
 `Age, Experience, Gender, and Dangerous Driving Behavior.pdf`.
 
 ## Accepted live evidence
@@ -21,14 +22,20 @@ They were not repaired or substituted.
 
 ## Enforcement
 
-`tests/psyarxiv-reference-freeze.test.mjs`:
+`tests/preprint-reference-freeze.test.mjs`:
 
-1. Keeps the cached psyArXiv baseline at 34 OCR pages and 64 references.
-2. Requires late article coverage through `5. Conclusion`.
-3. Verifies a real grouped psyArXiv citation against its exact cached OCR block.
-4. Verifies handle-only relation mapping and occurrence projection without
+1. Pins bibliography counts and the presence of raw OCR bibliography blocks for
+   medRxiv, chemRxiv, EarthArXiv, Research Square, and psyArXiv.
+2. Keeps the cached psyArXiv baseline at 34 OCR pages and 64 references.
+3. Requires late psyArXiv article coverage through `5. Conclusion`.
+4. Verifies a real grouped psyArXiv citation against its exact cached OCR block.
+5. Verifies handle-only relation mapping and occurrence projection without
    changing the bibliography inventory.
-5. Pins the bibliography, body-citation, and reference-relation request
+6. Requires the block-keyed bibliography response to cover every supplied block
+   exactly once, including continuation-only blocks.
+7. Verifies that missing blocks and model-normalized quotes fail closed and
+   remain observable instead of silently changing source evidence.
+8. Pins the bibliography, body-citation, and reference-relation request
    contracts by version and SHA-256 digest.
 
 The test uses immutable cached data and makes no Mistral calls. Any intentional

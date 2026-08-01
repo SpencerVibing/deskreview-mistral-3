@@ -1,16 +1,17 @@
 import { requestAnnotationChunk, requestCitationAnnotation, requestRawOcr, requestReferenceAnnotation } from '../services/mistral-ocr.js';
 import { hasValidDocumentAnnotation } from '../core/document-annotation-validation.js';
-import { referenceAnnotationIssues, referenceAnnotationPages } from '../core/reference-annotation.js';
+import { referenceAnnotationAcceptanceIssues, referenceAnnotationCoverage, referenceAnnotationPages, referenceAnnotationReferences } from '../core/reference-annotation.js';
 import { hasSourceLinkCandidates } from '../core/annotation-stages.js';
 import { hasValidDisplayLinks } from '../core/display-links-contract.js';
 import { requestDisplayLinks, displayLinksContent } from '../services/mistral-display-links.js';
 import { requestReferenceLinks, referenceLinksContent } from '../services/mistral-reference-links.js';
 import { hasReferenceLinkCandidates, hasValidReferenceLinks } from '../core/reference-links-contract.js';
-import { validCitationAnnotation } from '../core/citation-annotation.js';
+import { citationAnnotationIssues, citationAnnotationMentions, citationAnnotationPages } from '../core/citation-annotation.js';
 
 export const MAX_PDF_BYTES = 4 * 1024 * 1024;
 export const MAX_SOURCE_LINK_PACKET_BYTES = 2 * 1024 * 1024;
 export const MAX_REFERENCE_BLOCK_PACKET_BYTES = 512 * 1024;
+export const MAX_CITATION_BLOCK_PACKET_BYTES = 1024 * 1024;
 
 function validPdfPayload(payload = {}) {
   const base64 = String(payload.base64 || '');
@@ -60,6 +61,21 @@ function validReferenceBlocks(value) {
   ));
 }
 
+function validCitationBlocks(value) {
+  if (!Array.isArray(value) || !value.length || Buffer.byteLength(JSON.stringify(value)) > MAX_CITATION_BLOCK_PACKET_BYTES) return false;
+  return value.every((block) => (
+    block
+    && Number.isInteger(block.pageIndex)
+    && block.pageIndex >= 0
+    && block.pageId === `ocr-page-${block.pageIndex}`
+    && Number.isInteger(block.blockIndex)
+    && block.blockIndex >= 0
+    && block.blockId === `ocr-block-${block.pageIndex}-${block.blockIndex}`
+    && typeof block.text === 'string'
+    && block.text.trim().length > 0
+  ));
+}
+
 export async function referenceAnnotationPayload(payload, { fetchImpl = fetch, env = process.env } = {}) {
   if (!env.MISTRAL_API_KEY) return { status: 503, value: { error: 'Mistral API key is not configured.' } };
   if (!validPdfPayload(payload)) return { status: 400, value: { error: 'Upload a valid PDF up to 4 MB.' } };
@@ -74,13 +90,29 @@ export async function referenceAnnotationPayload(payload, { fetchImpl = fetch, e
     });
     if (!response.ok) return { status: response.status, value: { error: result?.error?.message || result?.message || 'Mistral reference annotation failed.' } };
     const annotation = typeof result.document_annotation === 'string' ? JSON.parse(result.document_annotation) : result.document_annotation;
-    const issues = referenceAnnotationIssues(annotation, payload.referenceBlocks);
-    if (issues.length) return { status: 502, value: { error: 'Mistral returned ungrounded reference details.', issues } };
+    const acceptanceIssues = referenceAnnotationAcceptanceIssues(annotation, payload.referenceBlocks);
+    const references = referenceAnnotationReferences(annotation);
+    const coverage = referenceAnnotationCoverage(annotation, payload.referenceBlocks);
+    if (acceptanceIssues.length) {
+      return {
+        status: 502,
+        value: {
+          error: 'Mistral returned an incomplete or invalid reference inventory.',
+          issues: acceptanceIssues,
+          diagnostics: {
+            pages,
+            references,
+            coverage
+          }
+        }
+      };
+    }
     return {
       status: 200,
       value: {
         pages,
-        references: annotation.references,
+        references,
+        coverage,
         model: result.model || env.MISTRAL_OCR_MODEL || 'mistral-ocr-latest',
         usage: result.usage_info || null
       }
@@ -93,21 +125,39 @@ export async function referenceAnnotationPayload(payload, { fetchImpl = fetch, e
 export async function citationAnnotationPayload(payload, { fetchImpl = fetch, env = process.env } = {}) {
   if (!env.MISTRAL_API_KEY) return { status: 503, value: { error: 'Mistral API key is not configured.' } };
   if (!validPdfPayload(payload)) return { status: 400, value: { error: 'Upload a valid PDF up to 4 MB.' } };
+  if (!validCitationBlocks(payload.citationBlocks)) return { status: 422, value: { error: 'Model-selected OCR article blocks are missing or malformed.' } };
   try {
+    const pages = citationAnnotationPages(payload.citationBlocks);
     const { response, payload: result } = await requestCitationAnnotation({
       base64: String(payload.base64),
-      pages: payload.pages,
+      citationBlocks: payload.citationBlocks,
       fetchImpl,
       env
     });
     if (!response.ok) return { status: response.status, value: { error: result?.error?.message || result?.message || 'Mistral body citation annotation failed.' } };
     const annotation = typeof result.document_annotation === 'string' ? JSON.parse(result.document_annotation) : result.document_annotation;
-    if (!validCitationAnnotation(annotation)) return { status: 502, value: { error: 'Mistral returned an incomplete body citation annotation.' } };
+    const issues = citationAnnotationIssues(annotation, payload.citationBlocks);
+    const citationMentions = citationAnnotationMentions(annotation, payload.citationBlocks);
+    if (issues.length) {
+      return {
+        status: 502,
+        value: {
+          error: 'Mistral returned ungrounded body citation details.',
+          issues,
+          diagnostics: {
+            pages,
+            citationBlocks: Array.isArray(annotation?.citation_blocks) ? annotation.citation_blocks : [],
+            citationMentions
+          }
+        }
+      };
+    }
     return {
       status: 200,
       value: {
-        pages: payload.pages,
-        annotation,
+        pages,
+        citationBlocks: annotation.citation_blocks,
+        citationMentions,
         model: result.model || env.MISTRAL_OCR_MODEL || 'mistral-ocr-latest',
         usage: result.usage_info || null
       }

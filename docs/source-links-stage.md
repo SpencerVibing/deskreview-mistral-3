@@ -2,9 +2,9 @@
 
 This document describes the bounded table/figure relation stage.
 
-References are not part of this stage. The annotation contract returns only a
-bibliography inventory. Body citation occurrences and reference relationships
-are intentionally not implemented.
+References are not part of this display-link stage. Bibliography inventory,
+body-citation extraction, and citation-to-reference relations have separate,
+bounded contracts.
 
 The display-link stage maps only already source-validated table and figure
 mention handles to already source-validated table and figure display handles.

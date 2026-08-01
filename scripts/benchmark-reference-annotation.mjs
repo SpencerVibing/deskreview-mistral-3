@@ -5,6 +5,7 @@ import {
   referenceAnnotationIssues,
   referenceAnnotationPrompt,
   referenceAnnotationPages,
+  referenceAnnotationReferences,
   referenceBlocksFromRawPages,
   referenceAnnotationContractVersion
 } from '../core/reference-annotation.js';
@@ -47,6 +48,7 @@ const annotation = typeof payload.document_annotation === 'string'
   ? JSON.parse(payload.document_annotation)
   : payload.document_annotation;
 const issues = response.ok ? referenceAnnotationIssues(annotation, referenceBlocks) : [];
+const references = referenceAnnotationReferences(annotation);
 const checkpoint = {
   capturedAt: new Date().toISOString(),
   contract: referenceAnnotationContractVersion,
@@ -58,7 +60,7 @@ const checkpoint = {
   response: {
     status: response.status,
     elapsedMs,
-    referenceCount: Array.isArray(annotation?.references) ? annotation.references.length : null,
+    referenceCount: references.length,
     issues,
     usage: payload?.usage_info || null,
     annotation: annotation || null,

@@ -1,19 +1,28 @@
-import { getDocument, GlobalWorkerOptions } from '/vendor/pdfjs/build/pdf.mjs';
+import { getDocument, GlobalWorkerOptions, TextLayer } from '/vendor/pdfjs/build/pdf.mjs';
 import { initHome, refreshHome } from '/home.js';
 import { loadReview, saveReview } from '/review-store.js';
 import { validateDeclaredSource } from '/core/source-anchor.js';
 import { createRuntimeLog, runtimeFlowModel } from '/app/runtime-log.js';
 import { headingLabel, inlineMarkdown, markdownLabel, plain, renderMarkdown } from '/app/markdown.js';
 import { projectAnnotation } from '/app/annotation-projection.js';
+import { renderSchemaOverview } from '/app/schema-browser.js';
 import { googleScholarUrl } from '/core/author-profiles.js';
 import { projectAffiliationLinkage } from '/core/affiliation-linkage.js';
 import { applySourceLinks, projectAnnotationChunks } from '/core/annotation-stages.js';
 import { annotationManifestIsComplete, annotationManifestSummary, createAnnotationRunManifest, markAnnotationRange } from '/core/annotation-manifest.js';
 import { wordCountProvenanceFromBlocks } from '/core/article-word-count.js';
+import { ocrMarkdownForPresentation } from '/core/ocr-presentation.js';
 import { documentAnnotationSourcePageMap } from '/core/document-annotation.js';
-import { referenceBlocksFromRawPages } from '/core/reference-annotation.js';
+import {
+  MIN_REFERENCE_TEXT_COVERAGE,
+  referenceAnnotationFormat,
+  referenceAnnotationPages,
+  referenceAnnotationPrompt,
+  referenceAnnotationPromptInstructions,
+  referenceBlocksFromRawPages
+} from '/core/reference-annotation.js';
 import { applyReferenceLinks } from '/core/reference-links-contract.js';
-import { bindCitationAnnotationRanges, bodyCitationPageRanges, citationAnnotationFormat, citationAnnotationPromptInstructions } from '/core/citation-annotation.js';
+import { bindCitationAnnotationRanges, bodyCitationBlockRanges, citationAnnotationFormat, citationAnnotationPrompt, citationAnnotationPromptInstructions, MAX_CITATION_REQUESTS_PER_MANUSCRIPT } from '/core/citation-annotation.js';
 
 GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/build/pdf.worker.mjs';
 
@@ -21,7 +30,7 @@ const el = (selector) => document.querySelector(selector);
 const categoryKinds = ['authors', 'affiliations', 'abstract', 'article', 'keywords', 'references', 'tables', 'figures'];
 const categoryLabels = { authors: 'Authors', affiliations: 'Affiliations', abstract: 'Abstract', article: 'Article', keywords: 'Keywords', references: 'References', tables: 'Tables', figures: 'Figures' };
 function initialCategoryStates(value = 'waiting') { return Object.fromEntries(categoryKinds.map((kind) => [kind, value])); }
-const state = { tocWidth: 288, countsWidth: 448, resizing: null, raw: null, openDetailKind: '', pdf: null, pdfRenderToken: 0, pdfResizeTimer: null, search: { query: '', matches: [], index: -1 }, annotations: { 'front-matter': null, body: null, references: null }, annotationChunks: [], annotationCandidates: null, citationExtraction: { status: 'idle', ranges: [], candidates: [] }, documentQna: { references: null, displays: [] }, annotationStatus: { 'front-matter': 'idle', body: 'idle', references: 'idle' }, annotationCoverage: { ranges: [], completed: [], failed: [] }, categoryStates: initialCategoryStates(), sourceLinksStatus: 'idle', sourceLinksByKind: { tables: 'idle', figures: 'idle' }, referenceLinksStatus: 'idle', authorProfiles: { status: 'idle', authors: [] }, authorProfileToken: 0, affiliationFilter: 'all', currentReview: null, preservingRuntimeSnapshot: false };
+const state = { tocWidth: 288, countsWidth: 448, resizing: null, raw: null, openDetailKind: '', pdf: null, pdfRenderToken: 0, pdfResizeTimer: null, search: { query: '', matches: [], index: -1 }, annotations: { 'front-matter': null, body: null, references: null }, annotationChunks: [], annotationCandidates: null, referenceInventory: { status: 'idle', pages: [], blockCount: 0, references: [], coverage: null, issues: [], error: '' }, citationExtraction: { status: 'idle', ranges: [], candidates: [] }, documentQna: { references: null, displays: [] }, annotationStatus: { 'front-matter': 'idle', body: 'idle', references: 'idle' }, annotationCoverage: { ranges: [], completed: [], failed: [] }, categoryStates: initialCategoryStates(), sourceLinksStatus: 'idle', sourceLinksByKind: { tables: 'idle', figures: 'idle' }, referenceLinksStatus: 'idle', authorProfiles: { status: 'idle', authors: [] }, authorProfileToken: 0, affiliationFilter: 'all', currentReview: null, preservingRuntimeSnapshot: false };
 const runtime = createRuntimeLog();
 const input = el('#pdfInput');
 const reader = el('#reader');
@@ -218,10 +227,8 @@ function renderRuntimeSummary() {
   });
 }
 function renderAnnotationSourceScope() {
-  const summary = el('#annotationSourceScopeSummary');
   const list = el('#annotationSourceScopeList');
   const combined = el('#annotationCombinedReferenceText');
-  summary.replaceChildren();
   list.replaceChildren();
   combined.textContent = '';
   const pages = state.raw?.pages || [];
@@ -240,7 +247,7 @@ function renderAnnotationSourceScope() {
     const empty = document.createElement('div');
     empty.className = 'alert alert-light border small mb-0';
     empty.textContent = 'Open a manuscript to inspect its raw OCR source scope.';
-    summary.append(empty);
+    list.append(empty);
     return;
   }
 
@@ -314,20 +321,7 @@ function renderAnnotationSourceScope() {
     }
   ];
 
-  const coveredPages = [...new Set(scopes.flatMap((scope) => scope.items.map((item) => item.pageIndex)).filter(Number.isFinite))];
-  const returnedBlockIds = new Set((state.annotations.references?.references || []).map((entry) => entry.source?.ocr_block_id).filter(Boolean));
-  const alert = document.createElement('div');
-  alert.className = 'alert alert-light border small';
-  const primary = document.createElement('div');
-  primary.className = 'fw-semibold text-body';
-  primary.textContent = `${scopes.length} source scope${scopes.length === 1 ? '' : 's'} identified across ${coveredPages.length} of ${pages.length} OCR pages.`;
-  const detail = document.createElement('div');
-  detail.className = 'text-secondary mt-1';
-  detail.textContent = referenceBlocks.length
-    ? `${referenceBlocks.length} raw OCR reference block${referenceBlocks.length === 1 ? '' : 's'} form the bounded reference-only annotation request.`
-    : 'Raw OCR did not return a references block for this manuscript.';
-  alert.append(primary, detail);
-  summary.append(alert);
+  const returnedBlockIds = new Set((state.annotations.references?.references || []).map((entry) => entry.origin?.ocr_block_id || entry.source?.ocr_block_id).filter(Boolean));
 
   scopes.forEach((scope, scopeIndex) => {
     const item = document.createElement('div');
@@ -358,7 +352,10 @@ function renderAnnotationSourceScope() {
       : `Pages ${scopePages.map((pageIndex) => pageIndex + 1).join(', ')}`;
     const count = document.createElement('span');
     count.className = 'badge text-bg-light border fw-normal ms-auto me-2';
-    count.textContent = `${scope.items.length} source${scope.items.length === 1 ? '' : 's'}`;
+    count.dataset.sourceScopeCount = '';
+    count.textContent = scope.key === 'references'
+      ? `${scope.items.length} OCR block${scope.items.length === 1 ? '' : 's'}`
+      : `${scope.items.length} item${scope.items.length === 1 ? '' : 's'}`;
     label.append(name, page, count);
     button.append(label);
     heading.append(button);
@@ -417,6 +414,196 @@ function renderAnnotationSourceScope() {
     ? referenceBlocks.map((block) => `[${block.id} · OCR page ${block.pageIndex + 1}]\n${block.content}`).join('\n\n')
     : 'No raw OCR references blocks were selected.';
 }
+function renderReferenceInventoryDiagnostics() {
+  const blocks = referenceBlocksFromRawPages(state.raw?.pages || []);
+  const formatOverview = el('#referenceAnnotationFormatOverview');
+  const formatCode = el('#referenceAnnotationFormatCode');
+  const promptList = el('#referenceAnnotationPromptInstructions');
+  const promptText = el('#referenceAnnotationPromptText');
+  const metrics = el('#referenceInventoryMetrics');
+  const status = el('#referenceInventoryStatus');
+  const audit = el('#referenceInventoryAudit');
+  formatOverview.replaceChildren();
+  formatCode.textContent = '';
+  promptList.replaceChildren();
+  promptText.textContent = '';
+  metrics.replaceChildren();
+  status.replaceChildren();
+  audit.replaceChildren();
+
+  if (blocks.length) {
+    const format = referenceAnnotationFormat(blocks);
+    renderSchemaOverview({ container: formatOverview, format, idPrefix: 'referenceSchema' });
+    formatCode.textContent = JSON.stringify(format, null, 2);
+    promptText.textContent = referenceAnnotationPrompt(blocks);
+  }
+  referenceAnnotationPromptInstructions.forEach((instruction) => {
+    const item = document.createElement('li');
+    item.className = 'mb-2';
+    item.textContent = instruction;
+    promptList.append(item);
+  });
+
+  const inventory = state.referenceInventory || {};
+  const references = inventory.references?.length
+    ? inventory.references
+    : (state.annotations.references?.references || []);
+  const issues = Array.isArray(inventory.issues) ? inventory.issues : [];
+  const coverage = inventory.coverage || null;
+  [
+    ['Bibliography OCR blocks', blocks.length],
+    ['Individual references', references.length],
+    ['Text coverage', coverage ? `${coverage.percent}%` : '—'],
+    ['Contract issues', issues.length]
+  ].forEach(([label, value]) => {
+    const metric = document.createElement('div');
+    metric.className = 'border rounded-3 bg-body px-3 py-2 text-end';
+    const count = document.createElement('div');
+    count.className = 'small fw-semibold';
+    count.textContent = String(value);
+    const caption = document.createElement('div');
+    caption.className = 'small text-secondary';
+    caption.textContent = label;
+    metric.append(count, caption);
+    metrics.append(metric);
+  });
+
+  const events = runtime.entries();
+  const eventByKey = (key) => [...events].reverse().find((event) => event.key === key) || null;
+  const rawOcrEvent = eventByKey('raw-ocr');
+  const requestEvent = eventByKey('reference-inventory:start');
+  const returnedEvent = eventByKey('reference-inventory:returned');
+  const acceptedEvent = eventByKey('reference-inventory:accepted');
+  const targetsEvent = eventByKey('reference-inventory:ready');
+  const unavailableEvent = eventByKey('reference-inventory:unavailable');
+  const completedState = inventory.status === 'ready' ? 'ready' : inventory.status === 'unavailable' ? 'unavailable' : inventory.status === 'pending' ? 'pending' : 'waiting';
+  const flowStages = [
+    { label: 'Raw OCR bibliography scope', icon: 'bi-file-earmark-text', event: rawOcrEvent, state: blocks.length ? 'ready' : completedState, detail: blocks.length ? `${blocks.length} OCR bibliography blocks selected from the raw OCR response.` : 'No bibliography OCR blocks were selected.' },
+    { label: 'Focused annotation request', icon: 'bi-send', event: requestEvent, state: requestEvent ? (completedState === 'waiting' ? 'pending' : 'ready') : completedState, detail: requestEvent?.detail || 'No focused bibliography request was recorded.' },
+    { label: 'Reference inventory returned', icon: 'bi-list-ol', event: returnedEvent || unavailableEvent, state: returnedEvent ? 'ready' : unavailableEvent ? 'unavailable' : completedState === 'pending' ? 'pending' : 'waiting', detail: returnedEvent?.detail || unavailableEvent?.detail || 'The annotation response has not been recorded yet.' },
+    { label: 'Passive contract check', icon: 'bi-shield-check', event: acceptedEvent || unavailableEvent, state: acceptedEvent ? 'ready' : unavailableEvent ? 'unavailable' : completedState === 'pending' ? 'pending' : 'waiting', detail: acceptedEvent?.detail || unavailableEvent?.detail || 'Checks have not completed yet.' },
+    { label: 'Individual HTML targets', icon: 'bi-link-45deg', event: targetsEvent || unavailableEvent, state: completedState, detail: targetsEvent?.detail || unavailableEvent?.detail || 'Stable HTML targets have not been created yet.' }
+  ];
+  const flowSection = document.createElement('section');
+  flowSection.className = 'mb-3';
+  flowSection.dataset.referenceInventoryFlow = '';
+  const flowHeading = document.createElement('h3');
+  flowHeading.className = 'h6 mb-1';
+  flowHeading.textContent = 'Processing flow';
+  const flowDescription = document.createElement('p');
+  flowDescription.className = 'small text-secondary mb-2';
+  flowDescription.textContent = 'Timestamps are measured from the start of this review. This view reports existing processing events only.';
+  const flow = document.createElement('div');
+  flow.className = 'runtime-dependency-flow d-grid gap-2 bg-light-subtle border rounded-3 p-3';
+  flowStages.forEach((stage, index) => {
+    const node = document.createElement('div');
+    node.className = 'runtime-dependency-step position-relative border rounded-3 bg-body p-3';
+    node.dataset.runtimeState = stage.state;
+    const step = document.createElement('div');
+    step.className = 'small text-secondary mb-2';
+    step.textContent = `Step ${index + 1}`;
+    const title = document.createElement('div');
+    title.className = 'small fw-semibold mb-2';
+    const icon = document.createElement('i');
+    icon.className = `bi ${stage.icon} text-secondary me-2`;
+    icon.setAttribute('aria-hidden', 'true');
+    title.append(icon, stage.label);
+    const statusNode = runtimeStatus(stage.state, stage.event?.elapsedMs ?? null, stage.detail);
+    const detail = document.createElement('div');
+    detail.className = 'small text-secondary mt-2';
+    detail.textContent = stage.detail;
+    node.append(step, title, statusNode, detail);
+    flow.append(node);
+  });
+  flowSection.append(flowHeading, flowDescription, flow);
+  status.append(flowSection);
+
+  const explanation = document.createElement('div');
+  explanation.className = 'alert alert-light border small mb-2';
+  explanation.textContent = 'Mistral separates the bounded bibliography OCR input into complete individual references. DeskReview renders every returned reference as its own stable HTML target. The focused response does not assign references back to individual raw OCR blocks.';
+  status.append(explanation);
+
+  const alert = document.createElement('div');
+  const tone = coverage && coverage.ratio < 0.9
+    ? 'alert-warning'
+    : inventory.status === 'ready'
+    ? 'alert-success'
+    : inventory.status === 'unavailable'
+      ? 'alert-warning'
+      : 'alert-light border';
+  alert.className = `alert ${tone} small mb-0`;
+  if (!blocks.length) {
+    alert.textContent = 'Raw OCR did not return bibliography blocks for a focused inventory request.';
+  } else if (coverage && coverage.ratio < 0.9) {
+    alert.textContent = `The returned reference text covers only ${coverage.percent}% of the supplied OCR bibliography blocks. This inventory is incomplete.`;
+  } else if (inventory.status === 'ready') {
+    alert.textContent = `${references.length} individual references were returned and prepared as separate HTML targets.`;
+  } else if (inventory.status === 'unavailable') {
+    alert.textContent = inventory.error || 'The focused bibliography response was unavailable.';
+  } else if (inventory.status === 'pending') {
+    alert.textContent = 'The focused bibliography inventory is still being prepared.';
+  } else {
+    alert.textContent = 'No focused bibliography inventory result was recorded for this review.';
+  }
+  status.append(alert);
+
+  const section = document.createElement('section');
+  section.className = 'mb-3';
+  section.dataset.referenceBlockAudit = '';
+  const heading = document.createElement('div');
+  heading.className = 'd-flex flex-wrap align-items-end justify-content-between gap-2 mb-2';
+  const headingText = document.createElement('div');
+  const title = document.createElement('h3');
+  title.className = 'h6 mb-1';
+  title.textContent = 'Individual references returned';
+  const description = document.createElement('p');
+  description.className = 'small text-secondary mb-0';
+  description.textContent = 'The focused response is deliberately flat: each row is one model-returned reference and one HTML target.';
+  headingText.append(title, description);
+  const count = document.createElement('span');
+  count.className = 'small text-secondary';
+  count.textContent = `${references.length} references`;
+  heading.append(headingText, count);
+  section.append(heading);
+
+  if (!references.length) {
+    const empty = document.createElement('div');
+    empty.className = 'alert alert-light border small mb-0';
+    empty.textContent = inventory.status === 'pending' ? 'The individual reference list is still being prepared.' : 'No individual references were returned.';
+    section.append(empty);
+    audit.append(section);
+    return;
+  }
+
+  const tableWrap = document.createElement('div');
+  tableWrap.className = 'table-responsive border rounded-3 overflow-hidden';
+  const table = document.createElement('table');
+  table.className = 'table table-sm align-middle mb-0';
+  table.innerHTML = '<thead class="table-light"><tr><th scope="col">#</th><th scope="col">Reference</th><th scope="col">HTML target</th></tr></thead>';
+  const tableBody = document.createElement('tbody');
+  references.forEach((reference, index) => {
+    const row = document.createElement('tr');
+    row.dataset.referenceAuditItem = String(index + 1);
+    const number = document.createElement('th');
+    number.scope = 'row';
+    number.className = 'small fw-medium text-secondary text-nowrap';
+    number.textContent = String(index + 1);
+    const text = document.createElement('td');
+    text.className = 'small text-break';
+    text.textContent = reference.text || 'Reference text was not returned.';
+    const target = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = 'badge fw-normal bg-success-subtle text-success-emphasis';
+    badge.textContent = 'Ready';
+    target.append(badge);
+    row.append(number, text, target);
+    tableBody.append(row);
+  });
+  table.append(tableBody);
+  tableWrap.append(table);
+  section.append(tableWrap);
+  audit.append(section);
+}
 function renderCitationGroundingAudit() {
   const metrics = el('#citationGroundingAuditMetrics');
   const container = el('#citationGroundingAudit');
@@ -429,9 +616,9 @@ function renderCitationGroundingAudit() {
     rejected: summary.rejected + range.rejected
   }), { returned: 0, accepted: 0, rejected: 0 });
   [
-    ['Returned', totals.returned],
-    ['Accepted', totals.accepted],
-    ['Rejected', totals.rejected]
+    ['Citation mentions found', totals.returned],
+    ['Source verified', totals.accepted],
+    ['Could not verify', totals.rejected]
   ].forEach(([label, value]) => {
     const metric = document.createElement('div');
     metric.className = 'border rounded-3 bg-body px-3 py-2 text-end';
@@ -451,145 +638,199 @@ function renderCitationGroundingAudit() {
     container.append(empty);
     return;
   }
+  const interpretation = document.createElement('div');
+  interpretation.className = 'alert alert-light border small mb-4';
+  const interpretationBase = 'Citation mentions found is the number of individual in-text citation occurrences Mistral identified across all article-text OCR blocks selected in Step 2; it is not the number of blocks. Source verified means DeskReview confirmed that the exact citation marker exists character-for-character in the OCR text block Mistral identified as its source. The complete OCR block is retained as context. Could not verify means the returned marker and that OCR block did not match exactly.';
+  interpretation.textContent = state.citationExtraction?.status === 'unavailable'
+    ? `${interpretationBase} At least one request failed source verification or was unavailable, so Document QnA did not start and source-verified rows remain diagnostic evidence only.`
+    : `${interpretationBase} Document QnA can then map each source-verified occurrence to one or more bibliography entries.`;
+  container.append(interpretation);
   const reasonLabels = {
-    label_not_in_context: 'The exact context quote does not contain the returned citation label',
-    context_not_unique_in_raw_ocr: 'The exact context quote could not be bound uniquely to raw OCR',
-    request_unavailable: 'The focused annotation request was unavailable'
+    label_not_in_context: 'The returned citation passage does not contain the complete citation marker Mistral reported',
+    context_not_unique_in_raw_ocr: 'The citation passage occurs in more than one OCR text block in this older stored review, so its source is ambiguous',
+    context_not_in_declared_ocr_block: 'The exact citation marker was not found in the OCR text block Mistral identified as its source',
+    citation_occurrence_exceeds_source: 'Mistral returned this citation marker more often than it occurs in the identified OCR text block',
+    validation_failed: 'The citation response did not pass exact source verification',
+    request_unavailable: 'Mistral did not return a usable response for this citation request'
   };
+  const sourceLabel = (item) => {
+    const pageMatch = /^ocr-page-(\d+)$/.exec(String(item.pageId || ''));
+    const blockMatch = /^ocr-block-\d+-(\d+)$/.exec(String(item.blockId || ''));
+    if (!pageMatch || !blockMatch) return 'Not returned';
+    return `Page ${Number(pageMatch[1]) + 1} · block ${Number(blockMatch[1]) + 1}`;
+  };
+  const requestSection = document.createElement('section');
+  requestSection.className = 'mb-4';
+  const requestTitle = document.createElement('h4');
+  requestTitle.className = 'h6 mb-1';
+  requestTitle.textContent = 'Citation extraction requests';
+  const requestDescription = document.createElement('p');
+  requestDescription.className = 'small text-secondary mb-2';
+  requestDescription.textContent = 'Each row is one bounded request. Article-text blocks is the number of OCR prose blocks checked in that request; Citation mentions is the number of individual in-text citations found inside them.';
+  const requestTableWrap = document.createElement('div');
+  requestTableWrap.className = 'table-responsive border rounded-3 overflow-hidden';
+  const requestTable = document.createElement('table');
+  requestTable.className = 'table table-sm align-middle mb-0';
+  requestTable.innerHTML = '<thead class="table-light"><tr><th scope="col">Pages</th><th scope="col">Article-text blocks</th><th scope="col">Citation mentions</th><th scope="col">Result</th></tr></thead>';
+  const requestBody = document.createElement('tbody');
   ranges.forEach((range, rangeIndex) => {
-    const rangeItem = document.createElement('div');
-    rangeItem.className = 'accordion-item';
-    rangeItem.dataset.citationAuditRange = range.id;
-    const rangeHeading = document.createElement('h4');
-    rangeHeading.className = 'accordion-header';
-    const rangeButton = document.createElement('button');
-    rangeButton.className = 'accordion-button collapsed py-2';
-    rangeButton.type = 'button';
-    const rangeCollapseId = `citation-audit-range-${rangeIndex}`;
-    rangeButton.dataset.bsToggle = 'collapse';
-    rangeButton.dataset.bsTarget = `#${rangeCollapseId}`;
-    rangeButton.setAttribute('aria-expanded', 'false');
-    rangeButton.setAttribute('aria-controls', rangeCollapseId);
-    const rangeLabel = document.createElement('span');
-    rangeLabel.className = 'd-flex flex-wrap align-items-center gap-2 w-100';
-    const rangeName = document.createElement('span');
-    rangeName.className = 'small fw-semibold';
-    rangeName.textContent = range.pages.length
-      ? `Pages ${range.pages[0] + 1}–${range.pages.at(-1) + 1}`
-      : `Body citation range ${rangeIndex + 1}`;
-    const returned = document.createElement('span');
-    returned.className = 'small text-secondary';
-    returned.textContent = `${range.returned} returned`;
-    const accepted = document.createElement('span');
-    accepted.className = 'badge bg-success-subtle text-success-emphasis fw-normal';
-    accepted.textContent = `${range.accepted} accepted`;
-    const rejected = document.createElement('span');
-    rejected.className = `badge fw-normal me-2 ${range.rejected ? 'bg-warning-subtle text-warning-emphasis' : 'text-bg-light border'}`;
-    rejected.textContent = `${range.rejected} rejected`;
-    rangeLabel.append(rangeName, returned, accepted, rejected);
-    rangeButton.append(rangeLabel);
-    rangeHeading.append(rangeButton);
-    const rangeCollapse = document.createElement('div');
-    rangeCollapse.id = rangeCollapseId;
-    rangeCollapse.className = 'accordion-collapse collapse';
-    const rangeBody = document.createElement('div');
-    rangeBody.className = 'accordion-body bg-light-subtle';
-    const reasons = Object.entries(range.reasonCounts);
-    if (reasons.length) {
-      const reasonSummary = document.createElement('div');
-      reasonSummary.className = 'alert alert-warning py-2 px-3 small mb-3';
-      reasons.forEach(([reason, count], index) => {
-        if (index) reasonSummary.append(document.createElement('br'));
-        reasonSummary.append(`${count} × ${reasonLabels[reason] || reason}`);
-      });
-      rangeBody.append(reasonSummary);
+    const suppliedBlocks = Array.isArray(range.suppliedBlocks) ? range.suppliedBlocks : [];
+    const blockResults = Array.isArray(range.blockResults) ? range.blockResults : null;
+    const row = document.createElement('tr');
+    row.dataset.citationAuditRange = range.id;
+    const pages = document.createElement('th');
+    pages.scope = 'row';
+    pages.className = 'small fw-medium text-nowrap p-0';
+    const collapseId = `citation-audit-details-${String(range.id || rangeIndex).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'btn btn-link link-body-emphasis text-decoration-none text-start w-100 d-inline-flex align-items-center gap-2 px-2 py-2 small fw-medium';
+    toggle.dataset.bsToggle = 'collapse';
+    toggle.dataset.bsTarget = `#${collapseId}`;
+    toggle.dataset.citationAuditToggle = range.id;
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.setAttribute('aria-controls', collapseId);
+    const icon = document.createElement('i');
+    icon.className = 'bi bi-chevron-right small text-secondary';
+    icon.setAttribute('aria-hidden', 'true');
+    const pageText = document.createElement('span');
+    pageText.textContent = range.pages.length ? `${range.pages[0] + 1}–${range.pages.at(-1) + 1}` : String(rangeIndex + 1);
+    toggle.append(icon, pageText);
+    pages.append(toggle);
+    const blocks = document.createElement('td');
+    blocks.className = 'small text-nowrap';
+    blocks.textContent = blockResults
+      ? blockResults.length === suppliedBlocks.length
+        ? `${suppliedBlocks.length} checked`
+        : `${blockResults.length} responses · ${suppliedBlocks.length} checked`
+      : `${suppliedBlocks.length} selected · no response`;
+    blocks.title = `${suppliedBlocks.length} article-text OCR blocks selected in Step 2; ${blockResults?.length || 0} block responses returned by Mistral.`;
+    const citations = document.createElement('td');
+    citations.className = 'small text-nowrap';
+    citations.textContent = `${range.returned} found · ${range.accepted} source verified${range.rejected ? ` · ${range.rejected} could not verify` : ''}`;
+    const result = document.createElement('td');
+    result.className = 'small';
+    const badge = document.createElement('span');
+    const unavailable = Boolean(range.reasonCounts?.request_unavailable);
+    const validationFailed = Boolean(range.reasonCounts?.validation_failed) || (!unavailable && range.rejected > 0);
+    badge.className = `badge fw-normal ${unavailable || validationFailed ? 'bg-warning-subtle text-warning-emphasis' : 'bg-success-subtle text-success-emphasis'}`;
+    badge.textContent = unavailable ? 'Unavailable' : validationFailed ? 'Source verification failed' : 'Ready';
+    result.append(badge);
+    const details = unavailable
+      ? [range.failureMessage || reasonLabels.request_unavailable]
+      : validationFailed
+        ? [`${range.rejected} citation passage${range.rejected === 1 ? '' : 's'} could not be verified against the identified OCR source. Expand this row for block-level details.`]
+        : [];
+    if (details.length) {
+      const detail = document.createElement('div');
+      detail.className = 'text-secondary mt-1';
+      detail.textContent = details.join(' · ');
+      result.append(detail);
     }
-    if (range.failureMessage) {
-      const failure = document.createElement('div');
-      failure.className = 'small text-secondary mb-3';
-      failure.textContent = range.failureMessage;
-      rangeBody.append(failure);
-    }
-    if (!range.items.length) {
-      const empty = document.createElement('div');
-      empty.className = 'small text-secondary';
-      empty.textContent = 'Mistral returned no body citation groups for this focused range.';
-      rangeBody.append(empty);
-    } else {
-      const citations = document.createElement('div');
-      citations.className = 'accordion';
-      citations.id = `citation-audit-items-${rangeIndex}`;
-      range.items.forEach((item, itemIndex) => {
-        const citation = document.createElement('div');
-        citation.className = 'accordion-item';
-        const heading = document.createElement('h5');
-        heading.className = 'accordion-header';
-        const button = document.createElement('button');
-        button.className = 'accordion-button collapsed py-2';
-        button.type = 'button';
-        const citationCollapseId = `citation-audit-${rangeIndex}-${itemIndex}`;
-        button.dataset.bsToggle = 'collapse';
-        button.dataset.bsTarget = `#${citationCollapseId}`;
-        button.setAttribute('aria-expanded', 'false');
-        button.setAttribute('aria-controls', citationCollapseId);
-        const buttonContent = document.createElement('span');
-        buttonContent.className = 'd-flex flex-wrap align-items-center gap-2 w-100 min-w-0';
-        const citationLabel = document.createElement('span');
-        citationLabel.className = 'small text-truncate';
-        citationLabel.textContent = item.label || item.itemExactQuote || `Citation ${itemIndex + 1}`;
-        const source = document.createElement('code');
-        source.className = 'small text-secondary';
-        source.textContent = [item.pageId, item.blockId].filter(Boolean).join(' · ') || 'Source unavailable';
-        const status = document.createElement('span');
-        status.className = `badge fw-normal ms-auto me-2 ${item.accepted ? 'bg-success-subtle text-success-emphasis' : 'bg-warning-subtle text-warning-emphasis'}`;
-        status.textContent = item.accepted ? 'Accepted' : 'Rejected';
-        buttonContent.append(citationLabel, source, status);
-        button.append(buttonContent);
-        heading.append(button);
-        const itemCollapse = document.createElement('div');
-        itemCollapse.id = citationCollapseId;
-        itemCollapse.className = 'accordion-collapse collapse';
-        const itemBody = document.createElement('div');
-        itemBody.className = 'accordion-body small';
-        [
-          ['label', item.label],
-          ['context_quote', item.contextQuote],
-          ['Declared source', [item.pageId, item.blockId].filter(Boolean).join(' · ')]
-        ].forEach(([label, value]) => {
-          const field = document.createElement('div');
-          field.className = 'mb-2';
-          const fieldLabel = document.createElement('code');
-          fieldLabel.className = 'd-block small text-secondary mb-1';
-          fieldLabel.textContent = label;
-          const fieldValue = document.createElement('div');
-          fieldValue.className = 'text-break';
-          fieldValue.textContent = value || 'Not returned';
-          field.append(fieldLabel, fieldValue);
-          itemBody.append(field);
+    row.append(pages, blocks, citations, result);
+    requestBody.append(row);
+    const detailRow = document.createElement('tr');
+    const detailCell = document.createElement('td');
+    detailCell.colSpan = 4;
+    detailCell.className = 'p-0 border-0';
+    const detailCollapse = document.createElement('div');
+    detailCollapse.id = collapseId;
+    detailCollapse.className = 'collapse bg-light-subtle border-top';
+    const detailBody = document.createElement('div');
+    detailBody.className = 'p-3 vstack gap-2';
+    detailCollapse.addEventListener('show.bs.collapse', () => icon.classList.replace('bi-chevron-right', 'bi-chevron-down'));
+    detailCollapse.addEventListener('hide.bs.collapse', () => icon.classList.replace('bi-chevron-down', 'bi-chevron-right'));
+    const returnedBlockIds = new Set((blockResults || []).map((block) => block?.ocr_block_id).filter(Boolean));
+    suppliedBlocks.forEach((block) => {
+      const blockItems = (range.items || []).filter((item) => item.blockId === block.blockId);
+      const blockCard = document.createElement('section');
+      blockCard.className = 'border rounded-2 bg-body p-3';
+      blockCard.dataset.citationAuditBlock = block.blockId;
+      const blockHeader = document.createElement('div');
+      blockHeader.className = 'd-flex flex-wrap align-items-center justify-content-between gap-2';
+      const blockTitle = document.createElement('div');
+      blockTitle.className = 'small fw-semibold';
+      blockTitle.textContent = sourceLabel({ pageId: block.pageId, blockId: block.blockId });
+      const blockBadge = document.createElement('span');
+      blockBadge.className = `badge fw-normal ${returnedBlockIds.has(block.blockId) ? 'text-bg-light border' : 'bg-warning-subtle text-warning-emphasis'}`;
+      blockBadge.textContent = returnedBlockIds.has(block.blockId)
+        ? `${blockItems.length} citation mention${blockItems.length === 1 ? '' : 's'} found`
+        : 'Block result missing';
+      blockHeader.append(blockTitle, blockBadge);
+      blockCard.append(blockHeader);
+      if (blockItems.length) {
+        const occurrenceList = document.createElement('div');
+        occurrenceList.className = 'list-group list-group-flush mt-2';
+        blockItems.forEach((item) => {
+          const occurrence = document.createElement('div');
+          occurrence.className = 'list-group-item px-0 py-2 bg-transparent d-flex align-items-start justify-content-between gap-3';
+          const occurrenceText = document.createElement('div');
+          occurrenceText.className = 'small text-break';
+          occurrenceText.textContent = item.anchorText || 'Not returned';
+          const occurrenceStatus = document.createElement('div');
+          occurrenceStatus.className = 'small text-end flex-shrink-0';
+          const occurrenceBadge = document.createElement('span');
+          occurrenceBadge.className = `badge fw-normal ${item.accepted ? 'bg-success-subtle text-success-emphasis' : 'bg-warning-subtle text-warning-emphasis'}`;
+          occurrenceBadge.textContent = item.accepted ? 'Source verified' : 'Could not verify';
+          occurrenceStatus.append(occurrenceBadge);
+          if (item.reasons.length) {
+            const reason = document.createElement('div');
+            reason.className = 'text-warning-emphasis mt-1';
+            reason.textContent = item.reasons.map((value) => reasonLabels[value] || value).join(' · ');
+            occurrenceStatus.append(reason);
+          }
+          occurrence.append(occurrenceText, occurrenceStatus);
+          occurrenceList.append(occurrence);
         });
-        if (item.reasons.length) {
-          const issueList = document.createElement('ul');
-          issueList.className = 'mb-0 ps-3 text-warning-emphasis';
-          item.reasons.forEach((reason) => {
-            const issue = document.createElement('li');
-            issue.textContent = reasonLabels[reason] || reason;
-            issueList.append(issue);
-          });
-          itemBody.append(issueList);
-        }
-        itemCollapse.append(itemBody);
-        citation.append(heading, itemCollapse);
-        citations.append(citation);
-      });
-      rangeBody.append(citations);
-    }
-    rangeCollapse.append(rangeBody);
-    rangeItem.append(rangeHeading, rangeCollapse);
-    container.append(rangeItem);
+        blockCard.append(occurrenceList);
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'small text-secondary mt-2';
+        empty.textContent = returnedBlockIds.has(block.blockId) ? 'No citation mentions were found in this block.' : 'Mistral did not return a result for this selected block.';
+        blockCard.append(empty);
+      }
+      const sourceDetails = document.createElement('details');
+      sourceDetails.className = 'mt-2';
+      const sourceSummary = document.createElement('summary');
+      sourceSummary.className = 'small link-secondary';
+      sourceSummary.textContent = 'View supplied OCR block text';
+      const sourceText = document.createElement('pre');
+      sourceText.className = 'developer-contract-code border rounded-2 mt-2 mb-0';
+      sourceText.textContent = block.text || '';
+      sourceDetails.append(sourceSummary, sourceText);
+      blockCard.append(sourceDetails);
+      detailBody.append(blockCard);
+    });
+    detailCollapse.append(detailBody);
+    detailCell.append(detailCollapse);
+    detailRow.append(detailCell);
+    requestBody.append(detailRow);
   });
+  requestTable.append(requestBody);
+  requestTableWrap.append(requestTable);
+  requestSection.append(requestTitle, requestDescription, requestTableWrap);
+  container.append(requestSection);
 }
 function renderFocusedCitationContract() {
-  el('#citationAnnotationFormatCode').textContent = JSON.stringify(citationAnnotationFormat, null, 2);
+  const container = el('#citationAnnotationFormatOverview');
+  const code = el('#citationAnnotationFormatCode');
+  const promptCode = el('#citationAnnotationPromptText');
+  container.replaceChildren();
+  code.textContent = '';
+  promptCode.textContent = '';
+  const firstRange = bodyCitationBlockRanges(state.annotationChunks, state.raw?.pages || [])[0];
+  if (firstRange?.blocks.length) {
+    const format = citationAnnotationFormat(firstRange.blocks);
+    renderSchemaOverview({ container, format, idPrefix: 'citationSchema' });
+    code.textContent = JSON.stringify(format, null, 2);
+    promptCode.textContent = citationAnnotationPrompt(firstRange.blocks);
+  } else {
+    const unavailable = document.createElement('div');
+    unavailable.className = 'alert alert-light border small mb-0';
+    unavailable.textContent = 'The exact body-citation schema is generated from the live OCR article-block packet. This stored review did not retain that packet.';
+    container.append(unavailable);
+    promptCode.textContent = 'The exact prompt and OCR block packet were not retained for this stored review.';
+  }
   const list = el('#citationAnnotationPromptInstructions');
   list.replaceChildren();
   citationAnnotationPromptInstructions.forEach((instruction) => {
@@ -720,7 +961,7 @@ function sourceIsUsable(item = {}) { return Boolean(resolveSource(item)); }
 function labelFor(kind) { return categoryLabels[kind] || kind; }
 function countUnit(kind, value) { const forms = { authors: ['author', 'authors'], affiliations: ['affiliation', 'affiliations'], abstract: ['word', 'words'], article: ['word', 'words'], keywords: ['keyword', 'keywords'], references: ['reference', 'references'], tables: ['table', 'tables'], figures: ['figure', 'figures'] }; const [singular, plural] = forms[kind] || ['item', 'items']; return Number(value) === 1 ? singular : plural; }
 function recordCountReady(kind, value) { recordRuntime(`${labelFor(kind)} count ready`, `${value} ${countUnit(kind, value)} returned.`, `count:${kind}`); }
-function recordSourceLinksReady(kind) { const items = sourceItems(kind); const confirmed = items.filter(sourceIsUsable).length; const detail = items.length ? `${confirmed}/${items.length} exact HTML source links confirmed.` : 'No source-linked items were returned.'; recordRuntime(`${labelFor(kind)} source links ready`, detail, `links:${kind}`); }
+function recordSourceLinksReady(kind) { const items = sourceItems(kind); const confirmed = kind === 'references' ? items.filter((item) => item.link_handle).length : items.filter(sourceIsUsable).length; const detail = items.length ? kind === 'references' ? `${confirmed}/${items.length} stable HTML reference targets ready.` : `${confirmed}/${items.length} exact HTML source links confirmed.` : 'No source-linked items were returned.'; recordRuntime(`${labelFor(kind)} source links ready`, detail, `links:${kind}`); }
 function categoryState(kind) { return state.categoryStates?.[kind] || 'waiting'; }
 function categoryStateLabel(value) { return ({ waiting: 'waiting', extracting: 'extracting', counted: 'counted', linking: 'preparing source links', ready: 'ready', unavailable: 'unavailable' })[value] || value; }
 function applyCategoryTileState(kind) {
@@ -809,19 +1050,20 @@ function appendMarkdownWithAssets(content, markdown = '', page = {}, pageIndex =
   (page.tables || []).forEach((table) => { const id = table.id || table.table_id; if (!id || !usedTables.has(id)) appendTableObject(content, table); });
   (page.images || []).forEach((image) => { const id = image.id || image.image_id; if (!id || !usedImages.has(id)) appendFigureObject(content, image, pageIndex, page.dimensions); });
 }
-function resolvedReferencesByPage() {
+function referenceHtmlProjection(pages = []) {
   const references = state.annotations.references?.references || [];
-  if (!references.length) return new Map();
-  const resolved = references.map((reference) => ({ reference, source: resolveSource(reference) }));
-  if (resolved.some(({ source }) => !source)) return new Map();
-  return resolved.reduce((groups, { reference, source }) => { const entries = groups.get(source.pageNumber) || []; entries.push(reference); groups.set(source.pageNumber, entries); return groups; }, new Map());
+  const blocks = referenceBlocksFromRawPages(pages);
+  if (!references.length || !blocks.length) return { pageNumbers: new Set(), targetPageNumber: 0, references: [] };
+  const pageNumbers = new Set(blocks.map((block) => block.pageIndex + 1));
+  return { pageNumbers, targetPageNumber: Math.min(...pageNumbers), references };
 }
 function appendAnnotatedReferences(content, references = [], pageHasReferenceHeading = false) {
   if (!references.length) return;
   const list = document.createElement('ol'); list.className = 'ocr-reference-list'; list.start = Number(references[0].number || 1);
   if (!pageHasReferenceHeading) list.setAttribute('aria-label', 'References');
-  references.forEach((reference) => {
+  references.forEach((reference, index) => {
     const item = document.createElement('li');
+    item.id = `reference-target-${index + 1}`;
     const printedNumber = Number(reference.number || 0);
     if (printedNumber) item.value = printedNumber;
     item.dataset.referenceNumber = String(reference.number || '');
@@ -832,7 +1074,40 @@ function appendAnnotatedReferences(content, references = [], pageHasReferenceHea
   });
   content.append(list);
 }
-function showHtml(pages = []) { const scroll = el('.html-scroll')?.scrollTop || 0; const referencesByPage = resolvedReferencesByPage(); htmlDocument.replaceChildren(); pages.forEach((page, index) => { const section = document.createElement('section'); section.className = 'ocr-page'; section.dataset.page = String(index + 1); const label = document.createElement('span'); label.className = 'ocr-page-label'; label.textContent = `Page ${index + 1}`; const content = document.createElement('div'); const pageNumber = index + 1; const annotatedReferences = referencesByPage.get(pageNumber) || []; const markdown = page.markdown || page.content || (page.blocks || []).map((block) => block.content || '').join('\n\n'); const referenceHeading = /(^#{1,6}\s+References\s*$)/im.exec(markdown); if (annotatedReferences.length && referenceHeading) appendMarkdownWithAssets(content, markdown.slice(0, referenceHeading.index + referenceHeading[0].length), page, index); else if (!annotatedReferences.length) appendMarkdownWithAssets(content, markdown, page, index); appendAnnotatedReferences(content, annotatedReferences, Boolean(referenceHeading)); section.append(label, content); htmlDocument.append(section); }); if (pages.length) { announceHtmlReady(); requestAnimationFrame(() => { const host = el('.html-scroll'); if (host) host.scrollTop = scroll; if (state.search.matches.length && !htmlPane.classList.contains('d-none')) showSearchMatch(); }); } }
+function showHtml(pages = []) {
+  const scroll = el('.html-scroll')?.scrollTop || 0;
+  const referenceProjection = referenceHtmlProjection(pages);
+  htmlDocument.replaceChildren();
+  pages.forEach((page, index) => {
+    const section = document.createElement('section');
+    section.className = 'ocr-page';
+    section.dataset.page = String(index + 1);
+    const label = document.createElement('span');
+    label.className = 'ocr-page-label';
+    label.textContent = `Page ${index + 1}`;
+    const content = document.createElement('div');
+    const pageNumber = index + 1;
+    const isBibliographyPage = referenceProjection.pageNumbers.has(pageNumber);
+    const markdown = isBibliographyPage && Array.isArray(page.blocks)
+      ? page.blocks.filter((block) => String(block?.type || '').toLowerCase() !== 'references').map((block) => block.content || '').join('\n\n')
+      : ocrMarkdownForPresentation(page);
+    appendMarkdownWithAssets(content, markdown, page, index);
+    if (pageNumber === referenceProjection.targetPageNumber) {
+      const hasReferenceHeading = /(^|\n)#{1,6}\s+References\s*($|\n)/i.test(markdown);
+      appendAnnotatedReferences(content, referenceProjection.references, hasReferenceHeading);
+    }
+    section.append(label, content);
+    htmlDocument.append(section);
+  });
+  if (pages.length) {
+    announceHtmlReady();
+    requestAnimationFrame(() => {
+      const host = el('.html-scroll');
+      if (host) host.scrollTop = scroll;
+      if (state.search.matches.length && !htmlPane.classList.contains('d-none')) showSearchMatch();
+    });
+  }
+}
 function scrollPdfToPage(pageNumber, attempts = 0) { const target = el(`.pdf-page[data-page="${pageNumber}"]`); if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); target.classList.add('pdf-page-target'); window.setTimeout(() => target?.classList.remove('pdf-page-target'), 1400); return; } if (state.pdf && attempts < 20) { window.setTimeout(() => scrollPdfToPage(pageNumber, attempts + 1), 100); return; } setMode('html'); el(`.ocr-page[data-page="${pageNumber}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 function scrollHighlightedMark(mark) { mark?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }); }
 function jumpToTocEntry(entry) { const pageNumber = sourcePage(entry); if (!pageNumber) return; if (!pdfPane.classList.contains('d-none')) { scrollPdfToPage(pageNumber); return; } const target = el(`.ocr-page[data-page="${pageNumber}"]`); clearSourceHighlight(); const mark = highlightExactQuote(target, entry.heading); if (mark) scrollHighlightedMark(mark); else target?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -896,9 +1171,26 @@ function showBodyCounts(annotation = {}) {
   refreshOpenDetails(['article', 'tables', 'figures']);
 }
 function showReferenceCounts(annotation = {}) {
+  // A presentation handle targets the independently rendered HTML item. It is
+  // semantics-free and also hydrates stored reviews created before v5.
+  annotation = {
+    ...annotation,
+    references: (annotation.references || []).map((item, index) => ({
+      ...item,
+      link_handle: item.link_handle || item.id || `reference:${index + 1}`
+    }))
+  };
   state.annotations.references = annotation;
   const count = annotation.references?.length || 0;
   const complete = state.annotationStatus.references === 'ready';
+  const inventoryCoverage = state.referenceInventory?.coverage || null;
+  if (inventoryCoverage?.sourceCharacters && inventoryCoverage.ratio < MIN_REFERENCE_TEXT_COVERAGE) {
+    setCategoryState('references', 'unavailable', `Only ${inventoryCoverage.percent}% of the OCR bibliography text was returned.`);
+    setCount('references', '—', false);
+    setTileProgress('references', 0, 'Incomplete bibliography');
+    refreshOpenDetails(['references']);
+    return;
+  }
   if (state.annotationStatus.references === 'unavailable') {
     setCategoryState('references', 'unavailable');
     setCount('references', '—', false);
@@ -922,6 +1214,8 @@ function showReferenceCounts(annotation = {}) {
 }
 async function runReferenceAnnotationStage(base64) {
   const referenceBlocks = referenceBlocksFromRawPages(state.raw?.pages || []);
+  const pages = referenceBlocks.length ? referenceAnnotationPages(referenceBlocks) : [];
+  state.referenceInventory = { status: 'pending', pages, blockCount: referenceBlocks.length, references: [], coverage: null, issues: [], error: '' };
   state.annotationStatus.references = 'pending';
   setCategoryState('references', 'extracting', 'Separating the bibliography into individual references.');
   setCount('references', 'Counting', true);
@@ -930,19 +1224,41 @@ async function runReferenceAnnotationStage(base64) {
   if (!referenceBlocks.length) throw new Error('Raw OCR did not return reference-list blocks.');
   recordRuntime('Reference inventory started', `${referenceBlocks.length} OCR reference blocks sent in one bounded annotation request.`, 'reference-inventory:start');
   const response = await request('/api/ocr/references', JSON.stringify({ base64, referenceBlocks }));
-  if (!response.response.ok) throw new Error(response.result?.error || 'Reference inventory was unavailable.');
+  if (!response.response.ok) {
+    state.referenceInventory = {
+      status: 'unavailable',
+      pages: response.result?.diagnostics?.pages || pages,
+      blockCount: referenceBlocks.length,
+      references: response.result?.diagnostics?.references || [],
+      coverage: response.result?.diagnostics?.coverage || null,
+      issues: response.result?.issues || [],
+      error: response.result?.error || 'Reference inventory was unavailable.'
+    };
+    throw new Error(state.referenceInventory.error);
+  }
+  recordRuntime('Reference inventory returned', `${(response.result.references || []).length} individual references returned from the focused annotation response.`, 'reference-inventory:returned');
+  state.referenceInventory = {
+    status: 'ready',
+    pages: response.result.pages || pages,
+    blockCount: referenceBlocks.length,
+    references: response.result.references || [],
+    coverage: response.result.coverage || null,
+    issues: [],
+    error: ''
+  };
+  recordRuntime('Reference inventory accepted', `${response.result.coverage?.percent ?? '—'}% bibliography text coverage passed the passive contract check.`, 'reference-inventory:accepted');
   const references = (response.result.references || []).map((item, index) => ({
     link_handle: item.id,
+    printed_label: item.printed_label,
     text: item.text,
     number: index + 1,
-    source: item.source,
     body_occurrences: []
   }));
   state.annotations.references = { references };
   state.annotationStatus.references = 'ready';
   showReferenceCounts(state.annotations.references);
   finishDirectSourceLinks();
-  recordRuntime('Reference inventory ready', `${references.length} individual references returned with exact HTML source anchors.`, 'reference-inventory:ready');
+  recordRuntime('Reference inventory ready', `${references.length} individual references rendered as stable HTML targets.`, 'reference-inventory:ready');
 }
 function request(path, payload) {
   return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload }).then(async (response) => {
@@ -967,9 +1283,10 @@ function detailSummaryText(kind, count, itemCount) {
   if (kind === 'abstract') return count === '—' ? 'Abstract word count was not returned for this stored review.' : `${count} abstract words counted from the manuscript text.`;
   return `${itemCount} ${labelFor(kind).toLowerCase()} item${itemCount === 1 ? '' : 's'} returned from the current document map.`;
 }
-function appendDetailStatus(container, text, pending = false) { const status = document.createElement('div'); status.className = `detail-link-status small text-secondary mt-2 d-flex align-items-center gap-2${pending ? ' is-pending' : ''}`; if (pending) status.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>'; const message = document.createElement('span'); message.textContent = text; status.append(message); container.append(status); }
+function appendDetailStatus(container, text, pending = false) { const status = document.createElement('div'); status.className = `detail-link-status small text-secondary mt-2 d-flex align-items-center gap-2${pending ? ' is-pending' : ''}`; if (pending) status.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span>'; const message = document.createElement('span'); message.className = pending ? 'detail-link-status-message' : ''; message.textContent = pending ? text.replace(/\.{3}$/, '') : text; if (pending) status.setAttribute('aria-label', text); status.append(message); container.append(status); }
 function appendSourceLinksPending(container, kind) {
-  if (!['tables', 'figures', 'references'].includes(kind) || sourceLinkStatus(kind) !== 'pending') return;
+  const status = sourceLinkStatus(kind);
+  if (!['tables', 'figures', 'references'].includes(kind) || ['ready', 'unavailable'].includes(status)) return;
   const pending = document.createElement('div');
   pending.className = 'details-pending d-flex align-items-center gap-3 mb-3';
   pending.innerHTML = '<span class="spinner-border spinner-border-sm" aria-hidden="true"></span><div><div class="small fw-semibold text-body">Finding manuscript mentions</div><div class="small text-secondary mt-1">The count is ready. Body-text mentions and jump links will appear here shortly.</div></div>';
@@ -1019,8 +1336,8 @@ function showSearchMatch() { const match = state.search.matches[state.search.ind
 function updateManuscriptSearch(query = '') { const normalized = String(query || '').trim(); state.search.query = normalized; clearSearchHighlights(); if (!normalized || !state.raw?.pages?.length) { state.search.matches = []; state.search.index = -1; updateSearchControls(); return; } const needle = normalized.toLocaleLowerCase(); state.search.matches = state.raw.pages.flatMap((page, pageIndex) => { const text = searchablePageText(page); const lower = text.toLocaleLowerCase(); const matches = []; let offset = lower.indexOf(needle); while (offset !== -1) { matches.push({ pageNumber: pageIndex + 1, text: text.slice(offset, offset + normalized.length) }); offset = lower.indexOf(needle, offset + Math.max(1, needle.length)); } return matches; }); state.search.index = state.search.matches.length ? 0 : -1; updateSearchControls(); showSearchMatch(); }
 function stepManuscriptSearch(direction) { const total = state.search.matches.length; if (!total) return; state.search.index = (state.search.index + direction + total) % total; updateSearchControls(); showSearchMatch(); }
 function resetManuscriptSearch() { el('#pdfSearchInput').value = ''; updateManuscriptSearch(''); }
-function findReferenceTarget(item, pageNumber) { const entries = [...document.querySelectorAll(`.ocr-page[data-page="${pageNumber}"] .ocr-reference-list li`)]; const handle = String(item?.link_handle || ''); if (handle) { const handled = entries.find((entry) => entry.dataset.referenceHandle === handle); if (handled) return handled; } const number = String(item?.number || ''); if (number) { const numbered = entries.find((entry) => entry.dataset.referenceNumber === number); if (numbered) return numbered; } const text = plain(item?.text || '').replace(/\s+/g, ' ').trim(); return entries.find((entry) => entry.dataset.referenceText === text) || entries.find((entry) => text && entry.dataset.referenceText.includes(text)); }
-function jumpToSource(item, kind = '') { const source = resolveSource(item); if (!source) return; setMode('html'); clearSourceHighlight(); const referenceTarget = kind === 'references' ? findReferenceTarget(item, source.pageNumber) : null; if (referenceTarget) { const mark = highlightExactQuote(referenceTarget, plain(item?.text || '').replace(/\s+/g, ' ').trim()); if (mark) scrollHighlightedMark(mark); else referenceTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); referenceTarget.classList.add('ocr-reference-target'); window.setTimeout(() => referenceTarget?.classList.remove('ocr-reference-target'), 1800); return; } const target = el(`.ocr-page[data-page="${source.pageNumber}"]`); const mark = source.canHighlight ? highlightSourceItem(target, source.anchorQuote, source.itemQuote) : null; if (mark) scrollHighlightedMark(mark); else { target?.scrollIntoView({ behavior: 'smooth', block: 'start' }); target?.classList.add('ocr-page-source-target'); window.setTimeout(() => target?.classList.remove('ocr-page-source-target'), 1400); } }
+function findReferenceTarget(item) { const entries = [...document.querySelectorAll('.ocr-reference-list li')]; const handle = String(item?.link_handle || ''); if (handle) { const handled = entries.find((entry) => entry.dataset.referenceHandle === handle); if (handled) return handled; } const number = String(item?.number || ''); if (number) { const numbered = entries.find((entry) => entry.dataset.referenceNumber === number); if (numbered) return numbered; } const text = plain(item?.text || '').replace(/\s+/g, ' ').trim(); return entries.find((entry) => entry.dataset.referenceText === text) || entries.find((entry) => text && entry.dataset.referenceText.includes(text)); }
+function jumpToSource(item, kind = '') { setMode('html'); clearSourceHighlight(); if (kind === 'references') { const referenceTarget = findReferenceTarget(item); if (!referenceTarget) return; const mark = highlightExactQuote(referenceTarget, plain(item?.text || '').replace(/\s+/g, ' ').trim()); if (mark) scrollHighlightedMark(mark); else referenceTarget.scrollIntoView({ behavior: 'smooth', block: 'center' }); referenceTarget.classList.add('ocr-reference-target'); window.setTimeout(() => referenceTarget?.classList.remove('ocr-reference-target'), 1800); return; } const source = resolveSource(item); if (!source) return; const target = el(`.ocr-page[data-page="${source.pageNumber}"]`); const mark = source.canHighlight ? highlightSourceItem(target, source.anchorQuote, source.itemQuote) : null; if (mark) scrollHighlightedMark(mark); else { target?.scrollIntoView({ behavior: 'smooth', block: 'start' }); target?.classList.add('ocr-page-source-target'); window.setTimeout(() => target?.classList.remove('ocr-page-source-target'), 1400); } }
 function profileForAuthor(index) { return state.authorProfiles.authors[index] || null; }
 function appendAuthorProfileLinks(card, author, profile) {
   const links = document.createElement('div');
@@ -1118,7 +1435,7 @@ function appendDetailItem(list, item, kind, index) {
     return;
   }
   const source = resolveSource(item);
-  const linked = Boolean(source);
+  const linked = kind === 'references' ? Boolean(item.link_handle) : Boolean(source);
   if (kind !== 'authors') {
     const hasOccurrences = ['tables', 'figures', 'references'].includes(kind) && Array.isArray(item.body_occurrences);
     const container = hasOccurrences ? document.createElement('div') : null;
@@ -1130,13 +1447,13 @@ function appendDetailItem(list, item, kind, index) {
     text.className = 'detail-source-text';
     text.textContent = detailText(item, kind);
     row.append(text);
-    if (source) row.addEventListener('click', () => jumpToSource(item, kind)); else appendDetailStatus(row, 'This item is available, but its exact source link could not be confirmed.');
+    if (linked) row.addEventListener('click', () => jumpToSource(item, kind)); else appendDetailStatus(row, 'This item is available, but its exact source link could not be confirmed.');
     if (!container) { list.append(row); return; }
     container.append(row);
     const occurrences = (item.body_occurrences || []).filter((occurrence) => resolveSource({ source: occurrence.source }));
     const linksStatus = sourceLinkStatus(kind);
     if (linksStatus !== 'ready') {
-      appendDetailStatus(container, linksStatus === 'unavailable' ? 'Manuscript-use links are currently unavailable.' : 'Finding body-text mentions...', linksStatus === 'pending');
+      appendDetailStatus(container, linksStatus === 'unavailable' ? 'Manuscript-use links are currently unavailable.' : 'Finding body-text mentions...', linksStatus !== 'unavailable');
       list.append(container);
       return;
     }
@@ -1148,13 +1465,17 @@ function appendDetailItem(list, item, kind, index) {
       const occurrenceRow = document.createElement('button');
       occurrenceRow.type = 'button';
       occurrenceRow.className = 'detail-occurrence-jump border-0 bg-transparent text-start w-100 px-0 py-2';
-      const citation = document.createElement('div');
-      citation.className = 'small fw-semibold text-body';
-      citation.textContent = occurrence.citation_text;
       const context = document.createElement('div');
-      context.className = 'small text-secondary mt-1';
+      context.className = 'small text-secondary';
       context.textContent = occurrence.context_quote;
-      occurrenceRow.append(citation, context);
+      if (occurrence.citation_text && occurrence.citation_text !== occurrence.context_quote) {
+        const citation = document.createElement('div');
+        citation.className = 'small fw-semibold text-body';
+        citation.textContent = occurrence.citation_text;
+        context.classList.add('mt-1');
+        occurrenceRow.append(citation);
+      }
+      occurrenceRow.append(context);
       occurrenceRow.addEventListener('click', () => jumpToSource({ source: occurrence.source, item_exact_quote: occurrence.citation_text }, ''));
       container.append(occurrenceRow);
     });
@@ -1344,18 +1665,21 @@ function finishDirectSourceLinks() {
   if (state.authorProfiles.status !== 'loading' && !el('[data-count="authors"]')?.classList.contains('is-loading')) { if (categoryState('authors') !== 'unavailable') setCategoryState('authors', 'ready'); setTileProgress('authors', 100, categoryState('authors') === 'unavailable' ? 'Unavailable' : 'Ready'); if (categoryState('authors') !== 'unavailable') recordSourceLinksReady('authors'); }
   const referenceTile = el('[data-count="references"]');
   if (referenceTile && !referenceTile.classList.contains('is-loading')) {
+    if (categoryState('references') === 'unavailable') {
+      setTileProgress('references', 0, 'Unavailable');
+      return;
+    }
     const references = sourceItems('references');
-    const confirmed = references.filter(sourceIsUsable).length;
     const linksReady = state.referenceLinksStatus === 'ready';
     const linksPending = state.referenceLinksStatus === 'pending';
-    setCategoryState('references', linksPending ? 'linking' : references.length && confirmed !== references.length ? 'counted' : linksReady ? 'ready' : 'counted');
+    setCategoryState('references', linksPending ? 'linking' : linksReady ? 'ready' : 'counted');
     setTileProgress('references', linksReady ? 100 : 76, linksReady ? 'Ready' : linksPending ? 'Finding body citations' : 'Count ready');
     if (linksReady) recordSourceLinksReady('references');
   }
 }
 
 async function runBodyCitationStage(base64) {
-  const ranges = bodyCitationPageRanges(state.annotationChunks);
+  const ranges = bodyCitationBlockRanges(state.annotationChunks, state.raw?.pages || []);
   state.citationExtraction = { status: 'pending', ranges: [], candidates: [] };
   recordRuntime(
     'Body citation extraction started',
@@ -1368,38 +1692,86 @@ async function runBodyCitationStage(base64) {
     recordRuntime('Body citation extraction unavailable', 'Broad annotation returned no article-page scope.', 'body-citations:unavailable');
     return;
   }
+  if (ranges.length > MAX_CITATION_REQUESTS_PER_MANUSCRIPT) {
+    state.citationExtraction.status = 'unavailable';
+    recordRuntime(
+      'Body citation extraction unavailable',
+      `${ranges.length} bounded requests would exceed the ${MAX_CITATION_REQUESTS_PER_MANUSCRIPT}-request manuscript budget.`,
+      'body-citations:unavailable',
+      { rangeCount: ranges.length, requestBudget: MAX_CITATION_REQUESTS_PER_MANUSCRIPT }
+    );
+    return;
+  }
   const records = [];
   const failures = [];
-  for (const [index, pages] of ranges.entries()) {
+  for (const [index, range] of ranges.entries()) {
+    const { pages, blocks } = range;
     try {
-      const response = await request('/api/ocr/citations', JSON.stringify({ base64, pages }));
-      if (!response.response.ok) throw new Error(response.result?.error || 'Body citation extraction was unavailable.');
-      records.push({ range_id: `citation-range-${index}`, pages, annotation: response.result.annotation });
+      const response = await request('/api/ocr/citations', JSON.stringify({ base64, citationBlocks: blocks }));
+      if (!response.response.ok) {
+        records.push({
+          range_id: `citation-range-${index}`,
+          pages,
+          supplied_blocks: blocks,
+          citation_blocks: response.result?.diagnostics?.citationBlocks ?? null,
+          citation_mentions: response.result?.diagnostics?.citationMentions || [],
+          issues: response.result?.issues || []
+        });
+        const error = new Error(response.result?.error || 'Body citation extraction was unavailable.');
+        error.failureType = Array.isArray(response.result?.issues) && response.result.issues.length ? 'validation_failed' : 'request_unavailable';
+        throw error;
+      }
+      records.push({
+        range_id: `citation-range-${index}`,
+        pages,
+        supplied_blocks: blocks,
+        citation_blocks: response.result.citationBlocks,
+        citation_mentions: response.result.citationMentions,
+        issues: []
+      });
       recordRuntime(
         'Body citation range ready',
-        `Pages ${pages[0] + 1}-${pages.at(-1) + 1}: ${response.result.annotation.citation_mentions.length} citation groups returned.`,
+        `Pages ${pages[0] + 1}-${pages.at(-1) + 1}: ${response.result.citationMentions.length} citation occurrences returned from ${blocks.length} article blocks.`,
         `body-citations:range:${pages[0]}`
       );
     } catch (error) {
-      failures.push({ range_id: `citation-range-${index}`, pages, message: error?.message || 'Body citation extraction was unavailable.' });
+      failures.push({ range_id: `citation-range-${index}`, pages, blocks, type: error?.failureType || 'request_unavailable', message: error?.message || 'Body citation extraction was unavailable.' });
       recordRuntime('Body citation range unavailable', `Pages ${pages[0] + 1}-${pages.at(-1) + 1}.`, `body-citations:range:${pages[0]}`);
     }
   }
   const grounded = bindCitationAnnotationRanges(records, state.raw?.pages || []);
-  const failedRanges = failures.map((failure) => ({
-    id: failure.range_id,
-    pages: failure.pages,
-    returned: 0,
-    accepted: 0,
-    rejected: 0,
-    reasonCounts: { request_unavailable: 1 },
-    failureMessage: failure.message,
-    items: []
-  }));
+  const groundedById = new Map(grounded.ranges.map((range) => [range.id, range]));
+  const failedRanges = failures.map((failure) => {
+    const diagnosticRange = groundedById.get(failure.range_id);
+    if (diagnosticRange) {
+      return {
+        ...diagnosticRange,
+        reasonCounts: { ...diagnosticRange.reasonCounts, [failure.type]: 1 },
+        failureMessage: failure.message
+      };
+    }
+    return {
+      id: failure.range_id,
+      pages: failure.pages,
+      returned: 0,
+      accepted: 0,
+      rejected: 0,
+      reasonCounts: { [failure.type]: 1 },
+      failureMessage: failure.message,
+      suppliedBlocks: failure.blocks,
+      blockResults: null,
+      issues: [],
+      items: []
+    };
+  });
+  const failedIds = new Set(failures.map((failure) => failure.range_id));
+  const acceptedCandidates = grounded.candidates;
   state.citationExtraction = {
-    status: failures.length ? 'unavailable' : 'ready',
-    ranges: [...grounded.ranges, ...failedRanges].sort((first, second) => (first.pages[0] ?? 0) - (second.pages[0] ?? 0)),
-    candidates: failures.length ? [] : grounded.candidates
+    // A failed or ungrounded occurrence must never be mapped, but it must not
+    // erase independently grounded occurrences from other blocks or ranges.
+    status: acceptedCandidates.length ? 'ready' : 'unavailable',
+    ranges: [...grounded.ranges.filter((range) => !failedIds.has(range.id)), ...failedRanges].sort((first, second) => (first.pages[0] ?? 0) - (second.pages[0] ?? 0)),
+    candidates: acceptedCandidates
   };
   state.annotationCandidates = {
     ...(state.annotationCandidates || {}),
@@ -1407,13 +1779,23 @@ async function runBodyCitationStage(base64) {
   };
   const returned = grounded.ranges.reduce((total, range) => total + range.returned, 0);
   const rejected = grounded.ranges.reduce((total, range) => total + range.rejected, 0);
-  if (failures.length) {
-    recordRuntime('Body citation extraction unavailable', `${failures.length}/${ranges.length} bounded ranges failed; Document QnA reference mapping was not started.`, 'body-citations:unavailable');
+  if (failures.length && !acceptedCandidates.length) {
+    const validationFailures = failures.filter((failure) => failure.type === 'validation_failed').length;
+    const serviceFailures = failures.length - validationFailures;
+    const reasons = [
+      validationFailures ? `${validationFailures} failed exact-source validation` : '',
+      serviceFailures ? `${serviceFailures} could not be completed` : ''
+    ].filter(Boolean).join('; ');
+    recordRuntime('Body citation extraction unavailable', `${failures.length}/${ranges.length} bounded ranges failed (${reasons}); Document QnA reference mapping was not started.`, 'body-citations:unavailable');
   } else {
-    recordRuntime('Body citation extraction ready', `${returned} returned; ${grounded.candidates.length} grounded; ${rejected} rejected.`, 'body-citations:ready', {
+    const partialDetail = failures.length
+      ? ` ${failures.length}/${ranges.length} bounded range${failures.length === 1 ? '' : 's'} did not yield usable anchors; only independently grounded occurrences proceed to mapping.`
+      : '';
+    recordRuntime('Body citation extraction ready', `${returned} returned; ${acceptedCandidates.length} grounded; ${rejected} rejected.${partialDetail}`, 'body-citations:ready', {
       returned,
-      accepted: grounded.candidates.length,
-      rejected
+      accepted: acceptedCandidates.length,
+      rejected,
+      failedRanges: failures.length
     });
   }
 }
@@ -1423,7 +1805,7 @@ async function startReferenceLinks() {
   const citationMentions = state.annotationCandidates?.citation_mentions || [];
   if (!references.length) return;
   const candidates = {
-    references: references.map((item) => ({ handle: item.link_handle, text: item.text })),
+    references: references.map((item) => ({ handle: item.link_handle, printed_label: String(item.printed_label || ''), text: item.text })),
     citation_mentions: citationMentions
   };
   state.documentQna.references = {
@@ -1442,16 +1824,26 @@ async function startReferenceLinks() {
   setTileProgress('references', 76, 'Finding body citations');
   refreshOpenDetails(['references']);
   if (!citationMentions.length) {
+    const citationRanges = state.citationExtraction?.ranges || [];
+    const extractionSummary = citationRanges.reduce((summary, range) => ({
+      returned: summary.returned + (range.returned || 0),
+      accepted: summary.accepted + (range.accepted || 0),
+      rejected: summary.rejected + (range.rejected || 0)
+    }), { returned: 0, accepted: 0, rejected: 0 });
+    const extractionFailed = state.citationExtraction?.status === 'unavailable' && extractionSummary.returned > 0;
+    const unavailableDetail = extractionFailed
+      ? `Body citation extraction returned ${extractionSummary.returned} occurrences, but its bounded requests did not all pass exact-source validation. Document QnA was not started.`
+      : 'Document annotation returned 0 body citation groups, so no relation request was sent.';
     state.referenceLinksStatus = 'unavailable';
-    setCategoryState('references', 'counted', 'The reference count is final; document annotation returned no body citation groups.');
+    setCategoryState('references', 'counted', extractionFailed ? 'The reference count is final; body citation extraction did not pass exact-source validation.' : 'The reference count is final; document annotation returned no body citation groups.');
     setTileProgress('references', 76, 'Citation links unavailable');
     recordRuntime(
       'Reference links unavailable',
-      'Document annotation returned 0 body citation groups, so no relation request was sent.',
+      unavailableDetail,
       'reference-links:unavailable',
-      { reason: 'no_citation_mentions' }
+      { reason: extractionFailed ? 'citation_extraction_failed_validation' : 'no_citation_mentions', ...extractionSummary }
     );
-    state.documentQna.references = { ...state.documentQna.references, status: 'unavailable', message: 'No grounded body citations were available for mapping.' };
+    state.documentQna.references = { ...state.documentQna.references, status: 'unavailable', message: extractionFailed ? `${extractionSummary.accepted} citation passages passed individually, but at least one bounded response failed validation, so no partial relation mapping was attempted.` : 'No source-verified body citations were available for mapping.' };
     refreshOpenDetails(['references']);
     return;
   }
@@ -1559,12 +1951,23 @@ async function renderPdfPages() {
     const initialViewport = page.getViewport({ scale: 1 });
     const scale = availableWidth / initialViewport.width;
     const viewport = page.getViewport({ scale });
-    const pageContainer = document.createElement('div'); pageContainer.className = 'pdf-page'; pageContainer.dataset.page = String(pageNumber);
+    const pageContainer = document.createElement('div'); pageContainer.className = 'pdf-page'; pageContainer.dataset.page = String(pageNumber); pageContainer.style.width = `${viewport.width}px`;
     const canvas = document.createElement('canvas'); const context = canvas.getContext('2d', { alpha: false });
     const deviceScale = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.className = 'pdf-page-canvas'; canvas.width = Math.floor(viewport.width * deviceScale); canvas.height = Math.floor(viewport.height * deviceScale);
+    canvas.className = 'pdf-page-canvas'; canvas.width = Math.floor(viewport.width * deviceScale); canvas.height = Math.floor(viewport.height * deviceScale); canvas.style.width = `${viewport.width}px`; canvas.style.height = `${viewport.height}px`;
+    const textLayer = document.createElement('div'); textLayer.className = 'pdf-text-layer';
     pageContainer.append(canvas); pdfCanvasHost.append(pageContainer);
-    await page.render({ canvasContext: context, viewport, transform: deviceScale === 1 ? null : [deviceScale, 0, 0, deviceScale, 0, 0] }).promise;
+    pageContainer.append(textLayer);
+    const renderedText = new TextLayer({
+      textContentSource: page.streamTextContent({ includeMarkedContent: true, disableNormalization: true }),
+      container: textLayer,
+      viewport
+    }).render();
+    await Promise.all([
+      page.render({ canvasContext: context, viewport, transform: deviceScale === 1 ? null : [deviceScale, 0, 0, deviceScale, 0, 0] }).promise,
+      renderedText
+    ]);
+    if (token !== state.pdfRenderToken) return;
   }
 }
 async function loadPdf(data) {
@@ -1598,9 +2001,11 @@ async function runAnnotationStages(base64, { beforeRemainingRanges } = {}) {
     }
   };
   const ranges = state.annotationCoverage.ranges;
-  if (ranges.length) await processRange(ranges[0]);
-  if (ranges.length > 1) {
+  if (ranges.length) {
+    await processRange(ranges[0]);
     if (typeof beforeRemainingRanges === 'function') await beforeRemainingRanges();
+  }
+  if (ranges.length > 1) {
     const remaining = ranges.slice(1);
     let nextRange = 0;
     const worker = async () => {
@@ -1630,7 +2035,7 @@ async function runAnnotationStages(base64, { beforeRemainingRanges } = {}) {
 async function upload(file) {
   if (file.type !== 'application/pdf') { fileName.textContent = 'Choose a PDF file.'; return; }
   if (file.size > 4 * 1024 * 1024) { fileName.textContent = 'This deployment accepts PDFs up to 4 MB.'; return; }
-  showReader(); startRuntime(); state.currentReview = null; state.preservingRuntimeSnapshot = false; state.annotations = { 'front-matter': null, body: null, references: { references: [] } }; state.annotationChunks = []; state.annotationCandidates = null; state.citationExtraction = { status: 'idle', ranges: [], candidates: [] }; state.documentQna = { references: null, displays: [] }; state.annotationStatus = { 'front-matter': 'idle', body: 'idle', references: 'idle' }; state.annotationCoverage = { ranges: [], completed: [], failed: [] }; state.categoryStates = initialCategoryStates(); state.sourceLinksStatus = 'idle'; state.sourceLinksByKind = { tables: 'idle', figures: 'idle' }; state.referenceLinksStatus = 'idle'; state.authorProfiles = { status: 'idle', authors: [] }; state.authorProfileToken += 1; recordRuntime('Upload started', file.name); fileName.textContent = file.name; setMode('pdf'); showProgress();
+  showReader(); startRuntime(); state.currentReview = null; state.preservingRuntimeSnapshot = false; state.annotations = { 'front-matter': null, body: null, references: { references: [] } }; state.annotationChunks = []; state.annotationCandidates = null; state.referenceInventory = { status: 'idle', pages: [], blockCount: 0, references: [], coverage: null, issues: [], error: '' }; state.citationExtraction = { status: 'idle', ranges: [], candidates: [] }; state.documentQna = { references: null, displays: [] }; state.annotationStatus = { 'front-matter': 'idle', body: 'idle', references: 'idle' }; state.annotationCoverage = { ranges: [], completed: [], failed: [] }; state.categoryStates = initialCategoryStates(); state.sourceLinksStatus = 'idle'; state.sourceLinksByKind = { tables: 'idle', figures: 'idle' }; state.referenceLinksStatus = 'idle'; state.authorProfiles = { status: 'idle', authors: [] }; state.authorProfileToken += 1; recordRuntime('Upload started', file.name); fileName.textContent = file.name; setMode('pdf'); showProgress();
   const pdfBytes = await file.arrayBuffer();
   const pdfBlob = new Blob([pdfBytes], { type: 'application/pdf' });
   loadPdf(pdfBytes.slice(0)).catch(() => { pdfEmpty.classList.remove('d-none'); pdfEmpty.querySelector('p').textContent = 'The PDF preview could not be rendered.'; });
@@ -1641,9 +2046,14 @@ async function upload(file) {
   if (!raw.response.ok) { recordRuntime('OCR unavailable', raw.result.error || 'Request failed.'); toc.textContent = 'Document structure is unavailable.'; note.textContent = 'The OCR source could not be returned.'; return; }
   recordRuntime('OCR ready', `${raw.result.pages.length} pages returned.`, 'raw-ocr');
   showRawOcr(raw.result);
-  const referencePromise = settled(runReferenceAnnotationStage(base64));
-  const annotationPromise = settled(runAnnotationStages(base64, { beforeRemainingRanges: () => referencePromise }));
-  const [annotationResult, referenceResult] = await Promise.all([annotationPromise, referencePromise]);
+  let referencePromise = null;
+  const startReferenceInventory = () => {
+    if (!referencePromise) referencePromise = settled(runReferenceAnnotationStage(base64));
+    return referencePromise;
+  };
+  const annotationPromise = settled(runAnnotationStages(base64, { beforeRemainingRanges: startReferenceInventory }));
+  const annotationResult = await annotationPromise;
+  const referenceResult = await startReferenceInventory();
   if (annotationResult.status === 'rejected') {
     state.annotationStatus = { ...state.annotationStatus, 'front-matter': 'unavailable', body: 'unavailable' };
     state.sourceLinksStatus = 'unavailable';
@@ -1663,16 +2073,18 @@ async function upload(file) {
     refreshOpenDetails(['references']);
     recordRuntime('Reference inventory unavailable', referenceResult.reason?.message || 'Individual references could not be prepared.', 'reference-inventory:unavailable');
   }
-  if (annotationResult.status === 'fulfilled' && referenceResult.status === 'fulfilled' && annotationManifestIsComplete(state.annotationCoverage)) {
+  if (annotationResult.status === 'fulfilled' && annotationManifestIsComplete(state.annotationCoverage)) {
     await runBodyCitationStage(base64);
-    await Promise.all([startSourceLinks(base64), startReferenceLinks()]);
+    const linkJobs = [startSourceLinks(base64)];
+    if (referenceResult.status === 'fulfilled') linkJobs.push(startReferenceLinks());
+    await Promise.all(linkJobs);
   } else if (referenceResult.status === 'fulfilled') {
     state.referenceLinksStatus = 'unavailable';
     finishDirectSourceLinks();
   }
   fileName.textContent = `${raw.result.fileName} · review results ready`;
   try {
-    state.currentReview = { id: crypto.randomUUID(), fileName: file.name, savedAt: new Date().toISOString(), pdfBlob, raw: raw.result, annotations: state.annotations, annotationChunks: state.annotationChunks, annotationCoverage: state.annotationCoverage, citationExtraction: state.citationExtraction, documentQna: state.documentQna, sourceLinksStatus: state.sourceLinksStatus, sourceLinksByKind: state.sourceLinksByKind, referenceLinksStatus: state.referenceLinksStatus, authorProfiles: [], runtimeSummary: runtime.entries() };
+    state.currentReview = { id: crypto.randomUUID(), fileName: file.name, savedAt: new Date().toISOString(), pdfBlob, raw: raw.result, annotations: state.annotations, annotationChunks: state.annotationChunks, annotationCoverage: state.annotationCoverage, referenceInventory: state.referenceInventory, citationExtraction: state.citationExtraction, documentQna: state.documentQna, sourceLinksStatus: state.sourceLinksStatus, sourceLinksByKind: state.sourceLinksByKind, referenceLinksStatus: state.referenceLinksStatus, authorProfiles: [], runtimeSummary: runtime.entries() };
     await saveReview(state.currentReview);
     if (state.authorProfiles.status === 'ready') persistAuthorProfiles(state.authorProfiles.authors);
     recordRuntime('Review stored locally', 'Available from the home page without another OCR request.', 'storage');
@@ -1683,12 +2095,30 @@ async function upload(file) {
 }
 async function openStoredReview(stored, pdfData, detail) {
   const hasOriginalRuntime = Array.isArray(stored.runtimeSummary) && stored.runtimeSummary.length > 0;
+  const storedReferenceInventoryEvent = (stored.runtimeSummary || []).findLast((event) => String(event?.key || '').startsWith('reference-inventory:'));
   startRuntime(hasOriginalRuntime ? stored.runtimeSummary : null);
   state.preservingRuntimeSnapshot = hasOriginalRuntime;
   if (!hasOriginalRuntime) recordRuntime('Stored review opened', 'Loading locally saved OCR and annotation results.');
   state.annotations = { 'front-matter': null, body: null, references: null };
   state.annotationChunks = Array.isArray(stored.annotationChunks) ? stored.annotationChunks : [];
   state.annotationCandidates = null;
+  state.referenceInventory = stored.referenceInventory || {
+    status: stored.annotations?.references?.references?.length
+      ? 'ready'
+      : storedReferenceInventoryEvent?.key === 'reference-inventory:unavailable'
+        ? 'unavailable'
+        : storedReferenceInventoryEvent?.key === 'reference-inventory:start'
+          ? 'pending'
+          : 'idle',
+    pages: [],
+    blockCount: referenceBlocksFromRawPages(stored.raw?.pages || []).length,
+    references: stored.annotations?.references?.references || [],
+    coverage: null,
+    issues: [],
+    error: storedReferenceInventoryEvent?.key === 'reference-inventory:unavailable'
+      ? storedReferenceInventoryEvent.detail || 'The focused bibliography response was unavailable.'
+      : ''
+  };
   state.citationExtraction = stored.citationExtraction || { status: 'idle', ranges: [], candidates: [] };
   state.documentQna = stored.documentQna || { references: null, displays: [] };
   state.annotationCoverage = stored.annotationCoverage || { ranges: [], completed: [], failed: [] };
@@ -1789,6 +2219,7 @@ el('#annotationContractModal').addEventListener('show.bs.modal', () => {
   renderDeveloperDiagnosticsContext();
   renderAnnotationSourceScope();
   renderFocusedCitationContract();
+  renderReferenceInventoryDiagnostics();
   renderCitationGroundingAudit();
   renderDocumentQnaDiagnostics();
   renderRuntimeSummary();

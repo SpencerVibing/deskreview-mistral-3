@@ -79,21 +79,76 @@ const invalidAnnotationResponse = await annotationChunkPayload({ fileName: 'fixt
 assert.equal(invalidAnnotationResponse.status, 502);
 
 let citationRequest;
-const citationResponse = await citationAnnotationPayload({ fileName: 'fixture.pdf', base64: pdf, pages: [0] }, {
+const citationBlocks = [{
+  pageIndex: 0,
+  pageId: 'ocr-page-0',
+  blockIndex: 0,
+  blockId: 'ocr-block-0-0',
+  text: 'Prior work (Smith, 2024) found this.'
+}];
+const citationResponse = await citationAnnotationPayload({ fileName: 'fixture.pdf', base64: pdf, citationBlocks }, {
   env: { MISTRAL_API_KEY: 'test-key', MISTRAL_BASE_URL: 'https://example.test', MISTRAL_OCR_TIMEOUT_MS: '1000' },
   fetchImpl: async (_url, request) => {
     citationRequest = JSON.parse(request.body);
     return new Response(JSON.stringify({
       document_annotation: {
-        citation_mentions: [{ label: '(Smith, 2024)', context_quote: 'Prior work (Smith, 2024) found this.' }]
+        citation_blocks: [{
+          ocr_page_id: 'ocr-page-0',
+          ocr_block_id: 'ocr-block-0-0',
+          citation_mentions: [{ citation_text: '(Smith, 2024)' }]
+        }]
       }
     }), { status: 200 });
   }
 });
 assert.equal(citationResponse.status, 200);
 assert.deepEqual(citationRequest.pages, [0]);
-assert.deepEqual(Object.keys(citationRequest.document_annotation_format.json_schema.schema.properties), ['citation_mentions']);
-assert.match(citationRequest.document_annotation_prompt, /narrative article prose/);
+assert.deepEqual(Object.keys(citationRequest.document_annotation_format.json_schema.schema.properties), ['citation_blocks']);
+assert.match(citationRequest.document_annotation_prompt, /AUTHORITATIVE RAW OCR ARTICLE BLOCKS/);
+assert.match(citationRequest.document_annotation_prompt, /Prior work \(Smith, 2024\) found this\./);
+assert.equal(citationResponse.value.citationBlocks.length, 1);
+assert.equal(citationResponse.value.citationMentions.length, 1);
+
+const alignedCitationBlocks = [{
+  pageIndex: 0,
+  pageId: 'ocr-page-0',
+  blockIndex: 0,
+  blockId: 'ocr-block-0-0',
+  text: 'Consistent with this view, Waller et al. (2001) found that risky driving declined with age.'
+}];
+const alignedCitationResponse = await citationAnnotationPayload({ fileName: 'fixture.pdf', base64: pdf, citationBlocks: alignedCitationBlocks }, {
+  env: { MISTRAL_API_KEY: 'test-key', MISTRAL_BASE_URL: 'https://example.test', MISTRAL_OCR_TIMEOUT_MS: '1000' },
+  fetchImpl: async () => new Response(JSON.stringify({
+    document_annotation: {
+      citation_blocks: [{
+        ocr_page_id: 'ocr-page-0',
+        ocr_block_id: 'ocr-block-0-0',
+        citation_mentions: [{ citation_text: '(Waller et al., 2001)' }]
+      }]
+    }
+  }), { status: 200 })
+});
+assert.equal(alignedCitationResponse.status, 200);
+assert.equal(alignedCitationResponse.value.citationMentions.length, 1);
+assert.equal(alignedCitationResponse.value.citationMentions[0].label, '(Waller et al., 2001)');
+assert.equal(alignedCitationResponse.value.citationMentions[0].source.exact_quote, 'Waller et al. (2001)');
+assert.equal(alignedCitationResponse.value.citationMentions[0].source_alignment, 'aligned');
+
+const rejectedCitationResponse = await citationAnnotationPayload({ fileName: 'fixture.pdf', base64: pdf, citationBlocks }, {
+  env: { MISTRAL_API_KEY: 'test-key', MISTRAL_BASE_URL: 'https://example.test', MISTRAL_OCR_TIMEOUT_MS: '1000' },
+  fetchImpl: async () => new Response(JSON.stringify({
+    document_annotation: {
+      citation_blocks: [{
+        ocr_page_id: 'ocr-page-0',
+        ocr_block_id: 'ocr-block-0-0',
+        citation_mentions: [{ citation_text: '(Jones, 2023)' }]
+      }]
+    }
+  }), { status: 200 })
+});
+assert.equal(rejectedCitationResponse.status, 502);
+assert.match(rejectedCitationResponse.value.issues.join(' '), /not present or uniquely alignable in its declared OCR block/);
+assert.equal(rejectedCitationResponse.value.diagnostics.citationBlocks.length, 1);
 
 let referenceRequest;
 const referenceBlocks = [{
@@ -109,7 +164,7 @@ const referenceResponse = await referenceAnnotationPayload({ fileName: 'fixture.
     referenceRequest = JSON.parse(request.body);
     return new Response(JSON.stringify({
       document_annotation: {
-        references: [{ id: 'ref-1', text: 'Smith A. Fixture study.', source: source(7, 0, 'Smith A. Fixture study.') }]
+        references: [{ id: 'ref-1', printed_label: '', text: 'Smith A. Fixture study.' }]
       }
     }), { status: 200 });
   }
@@ -121,6 +176,37 @@ assert.deepEqual(referenceRequest.pages, [7]);
 assert.deepEqual(Object.keys(referenceRequest.document_annotation_format.json_schema.schema.properties), ['references']);
 assert.match(referenceRequest.document_annotation_prompt, /AUTHORITATIVE RAW OCR REFERENCES BLOCKS/);
 assert.match(referenceRequest.document_annotation_prompt, /Smith A\. Fixture study\./);
+
+const rejectedReferenceResponse = await referenceAnnotationPayload({ fileName: 'fixture.pdf', base64: pdf, referenceBlocks }, {
+  env: { MISTRAL_API_KEY: 'test-key', MISTRAL_BASE_URL: 'https://example.test', MISTRAL_OCR_TIMEOUT_MS: '1000' },
+  fetchImpl: async () => new Response(JSON.stringify({
+    document_annotation: {
+      references: [{ id: 'ref-1', printed_label: '', text: '' }]
+    }
+  }), { status: 200 })
+});
+assert.equal(rejectedReferenceResponse.status, 502);
+assert.match(rejectedReferenceResponse.value.issues[0], /no text/);
+assert.equal(rejectedReferenceResponse.value.diagnostics.references.length, 1);
+assert.deepEqual(rejectedReferenceResponse.value.diagnostics.pages, [7]);
+
+const multiBlockInput = [
+  ...referenceBlocks,
+  { pageIndex: 8, pageId: 'ocr-page-8', blockIndex: 0, blockId: 'ocr-block-8-0', text: 'Jones B. Second fixture study.' }
+];
+const multiBlockResponse = await referenceAnnotationPayload({ fileName: 'fixture.pdf', base64: pdf, referenceBlocks: multiBlockInput }, {
+  env: { MISTRAL_API_KEY: 'test-key', MISTRAL_BASE_URL: 'https://example.test', MISTRAL_OCR_TIMEOUT_MS: '1000' },
+  fetchImpl: async () => new Response(JSON.stringify({
+    document_annotation: {
+      references: [
+        { id: 'ref-1', printed_label: '', text: 'Smith A. Fixture study.' },
+        { id: 'ref-2', printed_label: '', text: 'Jones B. Second fixture study.' }
+      ]
+    }
+  }), { status: 200 })
+});
+assert.equal(multiBlockResponse.status, 200, 'one flat response covers references supplied across multiple OCR blocks');
+assert.equal(multiBlockResponse.value.references.length, 2);
 
 const linkCandidates = {
   displays: [{ handle: 'display-1', kind: 'table', label: 'Table 1', source: source(0, 0, 'Fixture') }],
@@ -152,7 +238,7 @@ assert.equal(partialSourceLinks.status, 502);
 assert.equal((await displayLinksPayload({ pages: [], candidates: {} }, { env: { MISTRAL_API_KEY: 'test-key' } })).status, 409);
 
 const referenceLinkCandidates = {
-  references: [{ handle: 'ref-1', text: 'Smith A. Fixture study.' }],
+  references: [{ handle: 'ref-1', printed_label: '', text: 'Smith A. Fixture study.' }],
   citation_mentions: [{ handle: 'cite-1', citation_text: '(Smith, 2024)', context_quote: 'Prior work (Smith, 2024).', source: source(0, 0, 'Prior work (Smith, 2024).') }]
 };
 let referenceLinkRequest;
@@ -160,11 +246,11 @@ const referenceLinks = await referenceLinksPayload({ candidates: referenceLinkCa
   env: { MISTRAL_API_KEY: 'test-key', MISTRAL_DOCUMENT_QNA_SOURCE_LINKS_ENABLED: 'true', MISTRAL_BASE_URL: 'https://example.test', MISTRAL_REFERENCE_LINKS_TIMEOUT_MS: '1000' },
   fetchImpl: async (_url, request) => {
     referenceLinkRequest = JSON.parse(request.body);
-    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ citation_mappings: [{ citation_handle: 'cite-1', reference_handles: ['ref-1'] }], unmatched_citation_handles: [] }) } }] }), { status: 200 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ citation_decisions: [{ citation_handle: 'cite-1', classification: 'bibliographic_citation', reference_handles: ['ref-1'] }] }) } }] }), { status: 200 });
   }
 });
 assert.equal(referenceLinks.status, 200);
-assert.equal(referenceLinkRequest.response_format.json_schema.name, 'deskreview_reference_relation_mappings_v2');
+assert.equal(referenceLinkRequest.response_format.json_schema.name, 'deskreview_reference_relation_decisions_v4');
 assert.match(referenceLinkRequest.messages[0].content, /Validated reference and citation handles/);
 assert.doesNotMatch(referenceLinkRequest.messages[0].content, /data:application\/pdf;base64/);
 

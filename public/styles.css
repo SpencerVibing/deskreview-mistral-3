@@ -232,12 +232,18 @@ html.force-ambient-motion .home-view { animation: home-ambient-float 18s ease-in
 .html-scroll { container-type: inline-size; }
 .pdf-document { min-height: 100%; background: transparent; }
 #pdfCanvasHost { display: grid; gap: 1rem; justify-items: center; padding: .25rem 0; }
-.pdf-page { display: block; border-radius: .1rem; transition: outline-color .2s ease; }
+.pdf-page { position: relative; display: block; border-radius: .1rem; transition: outline-color .2s ease; }
 .pdf-page-target { outline: .18rem solid #c9b89c; outline-offset: .2rem; }
 .pdf-page-search-target { outline: .18rem solid #d4a75d; outline-offset: .2rem; }
-.pdf-page-canvas { display: block; max-width: 100%; height: auto; background: var(--desk-paper); box-shadow: 0 .5rem 1.5rem rgba(var(--desk-shadow), .12), 0 0 0 1px rgba(var(--desk-shadow), .06); }
+.pdf-page-canvas { position: relative; z-index: 0; display: block; max-width: 100%; height: auto; background: var(--desk-paper); box-shadow: 0 .5rem 1.5rem rgba(var(--desk-shadow), .12), 0 0 0 1px rgba(var(--desk-shadow), .06); }
+/* PDF.js needs positioned text spans to make the canvas source selectable. */
+.pdf-text-layer { position: absolute; inset: 0; z-index: 1; overflow: clip; line-height: 1; text-align: initial; text-size-adjust: none; transform-origin: 0 0; caret-color: CanvasText; user-select: text; }
+.pdf-text-layer :is(span, br) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0 0; user-select: text; }
+.pdf-text-layer > :not(.markedContent), .pdf-text-layer .markedContent span:not(.markedContent) { --font-height: 0; --scale-x: 1; --rotate: 0deg; font-size: calc(var(--text-scale-factor) * var(--font-height)); transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv)); }
+.pdf-text-layer .markedContent { display: contents; }
+.pdf-text-layer ::selection { color: transparent; background: rgba(116, 96, 69, .28); }
 .empty-state { color: var(--desk-muted); padding: 4rem 1.5rem; }
-.empty-state i { font-size: 2rem; }
+.empty-state > i { font-size: 2rem; }
 .ocr-html { width: 100%; max-width: none; min-height: 100%; margin: 0 auto; padding: clamp(1.5rem, 5cqi, 4rem); background: var(--desk-paper); box-shadow: 0 .5rem 1.5rem rgba(var(--desk-shadow), .12), 0 0 0 1px rgba(var(--desk-shadow), .06); color: #28251f; font-size: clamp(.82rem, 1.55cqi, 1.18rem); line-height: 1.65; white-space: pre-wrap; }
 .ocr-page { scroll-margin-top: 1em; padding: 0 0 2.25em; margin-bottom: 2.25em; border-bottom: 1px solid #ebe7de; }
 .ocr-page-label { display: inline-block; margin-bottom: 1em; color: var(--desk-muted); font-size: .75em; text-transform: uppercase; }
@@ -313,6 +319,13 @@ html.force-ambient-motion .home-view { animation: home-ambient-float 18s ease-in
 .detail-source-surface { padding: .85rem; border-radius: .45rem; background: #f3eee4; color: #494036; font-size: .84rem; line-height: 1.5; }
 .detail-jump:hover, .detail-jump:focus { background: #ece4d6; outline: none; }
 .detail-occurrence-jump:hover, .detail-occurrence-jump:focus { background: #ece4d6; outline: none; }
+.detail-link-status.is-pending .detail-link-status-message::after { display: inline-block; width: 1.25em; content: ""; text-align: left; }
+@media (prefers-reduced-motion: no-preference) {
+  /* This small source-link state has no Bootstrap animation equivalent. */
+  .detail-link-status.is-pending .detail-link-status-message { background: linear-gradient(100deg, var(--bs-secondary-color) 32%, #9a7d55 50%, var(--bs-secondary-color) 68%); background-size: 220% 100%; background-clip: text; color: transparent; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: detail-status-shimmer 2.8s ease-in-out infinite; }
+  .detail-link-status.is-pending .detail-link-status-message::after { animation: detail-status-ellipsis 1.5s steps(1, end) infinite; }
+}
+@media (prefers-reduced-motion: reduce) { .detail-link-status.is-pending .detail-link-status-message::after { content: "..."; } }
 .author-detail-card { padding: .85rem; }
 .author-detail-link { display: inline-flex; align-items: center; border-radius: .3rem; padding: .18rem .32rem; transition: background-color .16s ease, color .16s ease; }
 .author-detail-link:hover, .author-detail-link:focus-visible { background: #e8e0d1; color: var(--desk-accent) !important; outline: none; }
@@ -353,6 +366,8 @@ html.force-ambient-motion .home-view { animation: home-ambient-float 18s ease-in
 .runtime-result-table [aria-expanded="true"] .runtime-dependency-chevron { transform: rotate(180deg); }
 .runtime-dependency-chevron { transition: transform .2s ease; }
 @keyframes runtime-status-pulse { 50% { box-shadow: 0 0 0 5px rgba(154, 125, 85, .14); } }
+@keyframes detail-status-shimmer { 0%, 100% { background-position: 100% 0; } 50% { background-position: 0 0; } }
+@keyframes detail-status-ellipsis { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75%, 100% { content: "..."; } }
 @media (max-width: 1199.98px) {
   .runtime-flow { grid-template-columns: repeat(4, minmax(8rem, 1fr)); }
   .runtime-flow-stage::after { display: none; }

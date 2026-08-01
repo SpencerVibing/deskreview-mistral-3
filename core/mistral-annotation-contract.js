@@ -38,6 +38,18 @@ function findSourceSchema(schema) {
   return null;
 }
 
+function hasFlatReferenceInventory(schema) {
+  const referenceItems = schema?.properties?.references?.items;
+  if (!object(referenceItems)) return false;
+  const referenceRequired = new Set(referenceItems.required || []);
+  return Boolean(
+    referenceItems.properties?.id
+    && referenceItems.properties?.text
+    && referenceRequired.has('id')
+    && referenceRequired.has('text')
+  );
+}
+
 /** Ensures an annotation format is compact enough for Mistral's eight-page stage. */
 export function assertCompactAnnotationFormat(format) {
   const schema = format?.json_schema?.schema;
@@ -49,6 +61,7 @@ export function assertCompactAnnotationFormat(format) {
     });
   });
   if (violations.length) throw new TypeError(`Annotation schema duplicates raw OCR fields: ${[...new Set(violations)].join(', ')}.`);
+  if (hasFlatReferenceInventory(schema)) return format;
   const source = findSourceSchema(schema);
   if (!source?.properties?.exact_quote) throw new TypeError('Annotation schema sources require an exact_quote.');
   if (!source.properties.ocr_page_id || !source.properties.ocr_block_id) throw new TypeError('Annotation schema sources require OCR page and block identifiers.');

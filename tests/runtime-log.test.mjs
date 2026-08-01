@@ -43,4 +43,11 @@ assert.equal(flow.results.find((item) => item.kind === 'references').count.state
 assert.equal(flow.results.find((item) => item.kind === 'references').links.state, 'unavailable');
 assert.equal(flow.results.find((item) => item.kind === 'references').dependencies[1].state, 'unavailable');
 assert.match(flow.results.find((item) => item.kind === 'references').dependencies[1].detail, /0 grounded/);
+
+const failedInventoryFlow = runtimeFlowModel([
+  { key: 'reference-inventory:start', label: 'Reference inventory started', detail: '20 OCR reference blocks sent.', elapsedMs: 1200 },
+  { key: 'reference-inventory:unavailable', label: 'Reference inventory unavailable', detail: 'Mistral reference annotation timed out.', elapsedMs: 62300 }
+]);
+assert.equal(failedInventoryFlow.results.find((item) => item.kind === 'references').dependencies[0].state, 'unavailable');
+assert.match(failedInventoryFlow.results.find((item) => item.kind === 'references').dependencies[0].detail, /timed out/);
 console.log('runtime log: ok');

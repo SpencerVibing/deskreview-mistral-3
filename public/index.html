@@ -439,7 +439,7 @@
           <a class="brand-wordmark text-decoration-none" href="/" aria-label="DeskReview home"><span>Desk</span><strong>Review</strong></a>
         </div>
         <div class="toc-header px-3 mt-2"><span class="small text-secondary">Table of contents</span></div>
-        <nav id="tocList" class="toc-scroll p-2" aria-label="Table of contents"><div class="toc-pending d-flex align-items-center gap-2 px-2 py-2 small text-secondary"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Preparing the table of contents...</span></div></nav>
+        <nav id="tocList" class="toc-scroll p-2" aria-label="Table of contents"></nav>
       </aside>
       <div id="tocSplitter" class="studio-splitter" role="separator" aria-label="Resize table of contents" aria-orientation="vertical" tabindex="0"></div>
 
@@ -517,8 +517,9 @@
             <ul class="nav nav-tabs border-0" id="developerDiagnosticsTabs" role="tablist">
               <li class="nav-item" role="presentation"><button class="nav-link active" id="annotationSourceTab" data-bs-toggle="tab" data-bs-target="#annotationSourcePane" type="button" role="tab" aria-controls="annotationSourcePane" aria-selected="true">1. Source scope</button></li>
               <li class="nav-item" role="presentation"><button class="nav-link" id="annotationContractTab" data-bs-toggle="tab" data-bs-target="#annotationContractPane" type="button" role="tab" aria-controls="annotationContractPane" aria-selected="false">2. Annotation contract</button></li>
-              <li class="nav-item" role="presentation"><button class="nav-link" id="bodyCitationsTab" data-bs-toggle="tab" data-bs-target="#bodyCitationsPane" type="button" role="tab" aria-controls="bodyCitationsPane" aria-selected="false">3. Body citations</button></li>
-              <li class="nav-item" role="presentation"><button class="nav-link" id="documentQnaTab" data-bs-toggle="tab" data-bs-target="#documentQnaPane" type="button" role="tab" aria-controls="documentQnaPane" aria-selected="false">4. Document QnA</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="referenceInventoryTab" data-bs-toggle="tab" data-bs-target="#referenceInventoryPane" type="button" role="tab" aria-controls="referenceInventoryPane" aria-selected="false">3. Bibliography inventory</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="bodyCitationsTab" data-bs-toggle="tab" data-bs-target="#bodyCitationsPane" type="button" role="tab" aria-controls="bodyCitationsPane" aria-selected="false">4. Body citations</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" id="documentQnaTab" data-bs-toggle="tab" data-bs-target="#documentQnaPane" type="button" role="tab" aria-controls="documentQnaPane" aria-selected="false">5. Document QnA</button></li>
               <li class="nav-item" role="presentation"><button class="nav-link" id="runtimeSummaryTab" data-bs-toggle="tab" data-bs-target="#runtimeSummaryPane" type="button" role="tab" aria-controls="runtimeSummaryPane" aria-selected="false">Runtime summary</button></li>
             </ul>
           </div>
@@ -526,6 +527,7 @@
             <div class="tab-content h-100">
               <section class="tab-pane fade h-100 overflow-auto" id="annotationContractPane" role="tabpanel" aria-labelledby="annotationContractTab" tabindex="0">
                 <div class="container-fluid p-4">
+                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="annotation-contract"><div><span class="fw-semibold text-body">Purpose:</span> Define the structured manuscript data Mistral must return.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> The displayed JSON Schema and document-level instructions are sent with each bounded annotation request.</div></div>
                   <div class="row g-4">
                     <div class="col-12 col-xl-7">
                       <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
@@ -558,11 +560,11 @@
               </section>
               <section class="tab-pane fade show active h-100 overflow-auto" id="annotationSourcePane" role="tabpanel" aria-labelledby="annotationSourceTab" tabindex="0">
                 <div class="container-lg p-4">
+                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="source-scope"><div><span class="fw-semibold text-body">Purpose:</span> Confirm which manuscript source material DeskReview received.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> This view shows raw OCR pages and blocks, together with the regions selected for later extraction; it does not create relationships between items.</div></div>
                   <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
-                    <div><h3 class="h6 mb-1">Annotation source scopes</h3><p class="small text-secondary mb-0">Model-returned manuscript regions and raw OCR bibliography input, ordered by their first appearance.</p></div>
+                    <h3 class="h6 mb-0">Annotation source scopes</h3>
                     <span class="badge text-bg-light border fw-normal">Raw OCR</span>
                   </div>
-                  <div id="annotationSourceScopeSummary" class="mb-3"></div>
                   <div id="annotationSourceScopeList" class="accordion mb-3"></div>
                   <div class="accordion mb-4" id="annotationCombinedReferenceAccordion">
                     <div class="accordion-item">
@@ -572,32 +574,102 @@
                   </div>
                 </div>
               </section>
-              <section class="tab-pane fade h-100 overflow-auto" id="bodyCitationsPane" role="tabpanel" aria-labelledby="bodyCitationsTab" tabindex="0">
+              <section class="tab-pane fade h-100 overflow-auto" id="referenceInventoryPane" role="tabpanel" aria-labelledby="referenceInventoryTab" tabindex="0">
                 <div class="container-fluid p-4">
-                  <div class="row g-4 mb-4">
-                    <div class="col-12 col-xl-7">
-                      <h3 class="h6 font-monospace mb-1">document_annotation_format</h3>
-                      <p class="small text-secondary mb-3">Focused schema used only to extract citation groups from model-selected article pages.</p>
-                      <pre class="developer-contract-code"><code id="citationAnnotationFormatCode"></code></pre>
-                    </div>
-                    <div class="col-12 col-xl-5">
-                      <h3 class="h6 font-monospace mb-1">document_annotation_prompt</h3>
-                      <p class="small text-secondary mb-3">The bounded instruction for the body-citation extraction stage.</p>
-                      <ol id="citationAnnotationPromptInstructions" class="small text-body ps-4 mb-0"></ol>
-                    </div>
-                  </div>
+                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="bibliography-inventory"><div><span class="fw-semibold text-body">Purpose:</span> Turn OCR bibliography blocks into individual reference-list entries.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> A focused annotation returns each complete reference once. DeskReview renders each result as its own stable HTML target; this step does not search the article body.</div></div>
                   <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
                     <div>
-                      <h3 class="h6 mb-1">Citation extraction audit</h3>
-                      <p class="small text-secondary mb-0">Citations returned per body-page range and their passive exact-quote checks against raw OCR.</p>
+                      <h3 class="h6 mb-1">Bibliography extraction audit</h3>
+                      <p class="small text-secondary mb-0">How bibliography OCR blocks were separated into individual references and verified against the raw OCR text in those blocks.</p>
+                    </div>
+                    <div id="referenceInventoryMetrics" class="d-flex flex-wrap gap-2"></div>
+                  </div>
+                  <div id="referenceInventoryStatus" class="mb-3"></div>
+                  <div id="referenceInventoryAudit"></div>
+                  <div class="border-top pt-4 mt-5">
+                    <div class="mb-3">
+                      <h3 class="h6 mb-1">Technical request contract</h3>
+                      <p class="small text-secondary mb-0">The JSON Schema and instructions used for the focused bibliography extraction request.</p>
+                    </div>
+                  <div class="row g-4">
+                    <div class="col-12 col-xl-7">
+                      <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+                        <div><h3 class="h6 font-monospace mb-1">document_annotation_format</h3><p class="small text-secondary mb-0">Focused schema used to separate the raw OCR bibliography blocks into individual references.</p></div>
+                        <span class="badge text-bg-light border fw-normal">JSON Schema</span>
+                      </div>
+                      <div id="referenceAnnotationFormatOverview" class="accordion mb-3"></div>
+                      <div class="accordion" id="referenceAnnotationFormatAccordion">
+                        <div class="accordion-item">
+                          <h4 class="accordion-header"><button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#referenceAnnotationFormatRaw" aria-expanded="false" aria-controls="referenceAnnotationFormatRaw">View exact JSON schema</button></h4>
+                          <div id="referenceAnnotationFormatRaw" class="accordion-collapse collapse" data-bs-parent="#referenceAnnotationFormatAccordion"><div class="accordion-body p-0"><pre class="developer-contract-code"><code id="referenceAnnotationFormatCode"></code></pre></div></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-12 col-xl-5">
+                      <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+                        <div><h3 class="h6 font-monospace mb-1">document_annotation_prompt</h3><p class="small text-secondary mb-0">Instructions applied only to the OCR-selected bibliography pages and blocks.</p></div>
+                        <span class="badge text-bg-light border fw-normal">Instructions</span>
+                      </div>
+                      <ol id="referenceAnnotationPromptInstructions" class="small text-body ps-4 mb-3"></ol>
+                      <div class="accordion" id="referenceAnnotationPromptAccordion">
+                        <div class="accordion-item">
+                          <h4 class="accordion-header"><button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#referenceAnnotationPromptRaw" aria-expanded="false" aria-controls="referenceAnnotationPromptRaw">View exact prompt and source packet</button></h4>
+                          <div id="referenceAnnotationPromptRaw" class="accordion-collapse collapse" data-bs-parent="#referenceAnnotationPromptAccordion"><div class="accordion-body p-0"><pre id="referenceAnnotationPromptText" class="developer-contract-code developer-contract-prompt"></pre></div></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  </div>
+                </div>
+              </section>
+              <section class="tab-pane fade h-100 overflow-auto" id="bodyCitationsPane" role="tabpanel" aria-labelledby="bodyCitationsTab" tabindex="0">
+                <div class="container-fluid p-4">
+                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="body-citations"><div><span class="fw-semibold text-body">Purpose:</span> Find in-text citations in the article body.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> Step 2 identifies article-text OCR blocks. This step checks those blocks for citation mentions and verifies each returned citation passage against the OCR block Mistral identified as its source.</div></div>
+                  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+                    <div>
+                      <h3 class="h6 mb-1">In-text citation audit</h3>
+                      <p class="small text-secondary mb-0">Citation mentions found in the article-text OCR blocks, with exact source verification.</p>
                     </div>
                     <div id="citationGroundingAuditMetrics" class="d-flex flex-wrap gap-2"></div>
                   </div>
-                  <div id="citationGroundingAudit" class="accordion"></div>
+                  <div id="citationGroundingAudit"></div>
+                  <div class="border-top pt-4 mt-5">
+                    <div class="mb-3">
+                      <h3 class="h6 mb-1">Technical request contract</h3>
+                      <p class="small text-secondary mb-0">The JSON Schema and instructions used for the focused citation-extraction requests.</p>
+                    </div>
+                  <div class="row g-4">
+                    <div class="col-12 col-xl-7">
+                      <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+                        <div><h3 class="h6 font-monospace mb-1">document_annotation_format</h3><p class="small text-secondary mb-0">Block-keyed schema used only to extract citation occurrences from model-selected article OCR blocks.</p></div>
+                        <span class="badge text-bg-light border fw-normal">JSON Schema</span>
+                      </div>
+                      <div id="citationAnnotationFormatOverview" class="accordion mb-3"></div>
+                      <div class="accordion" id="citationAnnotationFormatAccordion">
+                        <div class="accordion-item">
+                          <h4 class="accordion-header"><button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#citationAnnotationFormatRaw" aria-expanded="false" aria-controls="citationAnnotationFormatRaw">View exact JSON schema</button></h4>
+                          <div id="citationAnnotationFormatRaw" class="accordion-collapse collapse" data-bs-parent="#citationAnnotationFormatAccordion"><div class="accordion-body p-0"><pre class="developer-contract-code"><code id="citationAnnotationFormatCode"></code></pre></div></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="col-12 col-xl-5">
+                      <h3 class="h6 font-monospace mb-1">document_annotation_prompt</h3>
+                      <p class="small text-secondary mb-3">The bounded instruction applied to each authoritative OCR article-block packet.</p>
+                      <ol id="citationAnnotationPromptInstructions" class="small text-body ps-4 mb-3"></ol>
+                      <div class="accordion" id="citationAnnotationPromptAccordion">
+                        <div class="accordion-item">
+                          <h4 class="accordion-header"><button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#citationAnnotationPromptRaw" aria-expanded="false" aria-controls="citationAnnotationPromptRaw">View exact prompt and OCR block packet</button></h4>
+                          <div id="citationAnnotationPromptRaw" class="accordion-collapse collapse" data-bs-parent="#citationAnnotationPromptAccordion"><div class="accordion-body p-0"><pre class="developer-contract-code"><code id="citationAnnotationPromptText"></code></pre></div></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  </div>
                 </div>
               </section>
               <section class="tab-pane fade h-100 overflow-auto" id="documentQnaPane" role="tabpanel" aria-labelledby="documentQnaTab" tabindex="0">
                 <div class="container-lg p-4">
+                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="document-qna"><div><span class="fw-semibold text-body">Purpose:</span> Connect already extracted manuscript items.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> Document QnA maps bibliography entries to body citations and tables or figures to their manuscript mentions; it does not extract or rewrite manuscript content.</div></div>
                   <div class="mb-4">
                     <h3 class="h6 mb-1">Relational source linking</h3>
                     <p class="small text-secondary mb-0">Document QnA maps already extracted source handles. It maps bibliography entries to body citations and tables or figures to body-text mentions; it does not extract manuscript entities.</p>
@@ -607,6 +679,7 @@
               </section>
               <section class="tab-pane fade h-100 overflow-auto" id="runtimeSummaryPane" role="tabpanel" aria-labelledby="runtimeSummaryTab" tabindex="0">
                 <div class="container-fluid p-4">
+                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="runtime-summary"><div><span class="fw-semibold text-body">Purpose:</span> Explain when each review result became available.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> This read-only view shows stage timing, dependencies, failures, and background work for count tiles and source links.</div></div>
                   <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
                     <div>
                       <h3 class="h6 mb-1">Review processing flow</h3>
@@ -641,6 +714,25 @@
     <div class="modal fade" id="guidelineSelectorModal" tabindex="-1" aria-label="Guideline selection" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-body p-0 guideline-selector-modal-body d-flex position-relative overflow-hidden"><button class="btn-close position-absolute top-0 end-0 m-3 z-3" type="button" data-bs-dismiss="modal"></button><aside class="guideline-facets border-end bg-light-subtle p-3 pt-5"><div class="small text-uppercase text-secondary mb-2">Guidelines</div><button class="btn btn-link text-decoration-none text-start w-100 active" type="button">All guidelines</button><button class="btn btn-link text-decoration-none text-start w-100" type="button">Essential guides</button><button class="btn btn-link text-decoration-none text-start w-100" type="button">Reporting guides</button><button class="btn btn-link text-decoration-none text-start w-100" type="button">Custom guides</button></aside><div class="d-flex flex-column flex-grow-1 p-4"><input class="form-control mb-4" type="search" placeholder="Find a guideline by name, domain, or study type"><div class="guideline-card-grid"><button class="card border-0 shadow-sm text-start guideline-select-card" type="button" data-open-guideline="CONSORT"><span class="card-body"><span class="h6 d-block mb-2">CONSORT</span><span class="small text-secondary">Randomised trials</span></span></button><button class="card border-0 shadow-sm text-start guideline-select-card" type="button" data-open-guideline="EASE Essential"><span class="card-body"><span class="h6 d-block mb-2">EASE Essential guidelines</span><span class="small text-secondary">Clear scientific reporting</span></span></button></div></div><section id="guidelineDetailSlider" class="guideline-detail-slider bg-body d-flex flex-column"><div class="d-flex justify-content-end p-3"><button id="closeGuidelineDetailSlider" class="btn btn-light border" type="button" aria-label="Close guideline details"><i class="bi bi-chevron-right"></i></button></div><div class="p-4 pt-2 overflow-auto"><h3 id="guidelineDetailName" class="h4">Select a guideline</h3><p class="text-secondary">Explore the original checklist, scope, and source publication.</p><ul class="nav nav-underline mb-3"><li class="nav-item"><button class="nav-link active" type="button">Checklist</button></li><li class="nav-item"><button class="nav-link" type="button">Aims &amp; scope</button></li><li class="nav-item"><button class="nav-link" type="button">References</button></li></ul><div class="list-group list-group-flush"><div class="list-group-item px-0"><div class="fw-medium">Checklist item</div><div class="small text-secondary mt-1">Guideline details appear here.</div></div></div></div></section></div></div></div></div>
     <div class="modal fade" id="feedbackReportModal" tabindex="-1" aria-labelledby="feedbackReportTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 id="feedbackReportTitle" class="modal-title fs-5">Feedback report</h2><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body bg-body-tertiary"><div class="empty-note">A feedback report will be generated from completed checks.</div></div><div class="modal-footer"><button class="btn btn-dark" type="button">Save as PDF</button></div></div></div></div>
     <div class="modal fade" id="storedReviewsModal" tabindex="-1" aria-labelledby="storedReviewsTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><div><h2 id="storedReviewsTitle" class="modal-title fs-6">Stored desk reviews</h2><div class="small text-secondary">Private to this browser</div></div><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body"><div class="d-flex justify-content-end mb-3"><label class="btn btn-primary btn-sm mb-0"><i class="bi bi-upload me-1" aria-hidden="true"></i>Upload PDF<input id="storedReviewsPdfInput" class="visually-hidden" type="file" accept="application/pdf"></label></div><div id="storedReviewsEmpty" class="empty-note text-center py-5 d-none"><i class="bi bi-archive d-block fs-4 mb-2" aria-hidden="true"></i><div class="fw-semibold mb-1">No stored desk reviews yet</div><div class="small text-secondary">Uploaded manuscripts that finish analysis will appear here.</div></div><div id="storedReviewsTableWrap" class="table-responsive"><table class="table table-hover align-middle mb-0 home-stored-table"><thead><tr><th scope="col">Manuscript</th><th scope="col">Pages</th><th scope="col">Counts</th><th scope="col">Stored</th><th scope="col" class="text-end">Actions</th></tr></thead><tbody id="reviewLibraryBody"></tbody></table></div></div></div></div></div>
+    <div class="modal fade" id="deleteStoredReviewModal" tabindex="-1" aria-labelledby="deleteStoredReviewTitle" aria-describedby="deleteStoredReviewDescription" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 id="deleteStoredReviewTitle" class="modal-title fs-6">Delete stored desk review?</h2>
+            <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <p id="deleteStoredReviewDescription" class="mb-2">This removes the review and its PDF from this browser.</p>
+            <div id="deleteStoredReviewName" class="small fw-semibold text-break"></div>
+            <div id="deleteStoredReviewError" class="alert alert-danger small py-2 px-3 mt-3 mb-0 d-none" role="alert">The stored review could not be deleted.</div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-light border" type="button" data-bs-dismiss="modal">Cancel</button>
+            <button id="confirmDeleteStoredReviewButton" class="btn btn-danger" type="button">Delete review</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="modal fade" id="reviewerFormModal" tabindex="-1" aria-labelledby="reviewerFormTitle" aria-hidden="true"><div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 id="reviewerFormTitle" class="modal-title fs-5">Reviewer form</h2><button class="btn-close" type="button" data-bs-dismiss="modal"></button></div><div class="modal-body"><label class="form-label" for="reviewerFormName">Name</label><input id="reviewerFormName" class="form-control mb-3" placeholder="e.g. Statistical review checklist"><label class="form-label" for="reviewerFormDescription">Description</label><textarea id="reviewerFormDescription" class="form-control" rows="4"></textarea></div><div class="modal-footer"><button class="btn btn-light border" type="button" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" type="button" data-bs-dismiss="modal">Save reviewer form</button></div></div></div></div>
     <div class="modal fade" id="homeDemoModal" tabindex="-1" aria-labelledby="homeDemoTitle" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content overflow-hidden"><div class="modal-header"><h2 id="homeDemoTitle" class="modal-title fs-6">DeskReview demo</h2><button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body p-0"><video id="homeDemoVideo" class="w-100 d-block" controls preload="metadata"><source src="/assets/demo.mp4" type="video/mp4"></video></div></div></div></div>
     <script src="/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
