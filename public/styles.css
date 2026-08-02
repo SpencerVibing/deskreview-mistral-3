@@ -249,9 +249,7 @@ html.force-ambient-motion .home-view { animation: home-ambient-float 18s ease-in
 .ocr-page-label { display: inline-block; margin-bottom: 1em; color: var(--desk-muted); font-size: .75em; text-transform: uppercase; }
 .ocr-markdown-heading { margin: 1.5em 0 .7em; font-size: 1.15em; font-weight: 650; }
 .ocr-markdown-paragraph { margin: 0 0 1em; }
-.ocr-math { font-family: "Times New Roman", Times, serif; }
-.ocr-fraction { display: inline-flex; flex-direction: column; line-height: .82; text-align: center; vertical-align: middle; }
-.ocr-fraction span { border-top: 1px solid currentColor; font-size: 0; }
+.ocr-html .katex-display { overflow-x: auto; overflow-y: hidden; padding: .25em 0; }
 .ocr-table-wrap, .ocr-figure { margin: 1.5em 0; padding: 1em; border: 1px solid #e8e1d5; border-radius: .4rem; background: #fcfbf8; }
 .ocr-display-label { margin-bottom: .75em; color: var(--desk-muted); font-size: .75em; font-weight: 600; text-transform: uppercase; }
 .ocr-table-wrap .table { font-size: .8em; }
@@ -344,6 +342,7 @@ html.force-ambient-motion .home-view { animation: home-ambient-float 18s ease-in
 .modal-header, .modal-footer { border-color: #e8e4dc; }
 .developer-contract-code { margin: 0; padding: 1.25rem 1.5rem; color: #40392f; background: #fcfbf8; font-size: .78rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
 .developer-contract-prompt { font-family: var(--bs-font-sans-serif); font-size: .9rem; }
+.diagnostics-purpose-alert { background: #eef6fd; border-color: #cfe1f1 !important; color: var(--desk-muted); }
 /* Bootstrap supplies the surfaces; custom rules only draw the diagnostic flow connectors and state markers. */
 .runtime-flow { display: grid; grid-template-columns: repeat(7, minmax(7.5rem, 1fr)); gap: 1.25rem; }
 .runtime-flow-stage::after { content: ""; position: absolute; top: 1.55rem; left: calc(100% + .25rem); width: .75rem; height: 1px; background: var(--bs-border-color); }

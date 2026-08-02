@@ -23,6 +23,7 @@ await mkdir(join(dist, 'core'), { recursive: true });
 await Promise.all(browserCoreFiles.map((file) => cp(join(root, 'core', file), join(dist, 'core', file))));
 await cp(join(root, 'node_modules/bootstrap/dist'), join(dist, 'vendor/bootstrap'), { recursive: true });
 await cp(join(root, 'node_modules/bootstrap-icons/font'), join(dist, 'vendor/bootstrap-icons'), { recursive: true });
+await cp(join(root, 'node_modules/katex/dist'), join(dist, 'vendor/katex'), { recursive: true });
 await cp(join(root, 'node_modules/pdfjs-dist'), join(dist, 'vendor/pdfjs'), { recursive: true });
 
 console.log('Built static site in dist/.');

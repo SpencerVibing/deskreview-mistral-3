@@ -14,12 +14,13 @@
     "test:static": "npm run build && node tests/static-build.test.mjs",
     "benchmark:references:psyarxiv": "node scripts/benchmark-reference-annotation.mjs",
     "benchmark:citations:medrxiv": "node scripts/benchmark-citation-annotation.mjs",
-    "test:ui": "node tests/reader-shell.test.mjs && node tests/pdf-text-layer.test.mjs",
+    "test:ui": "node tests/reader-shell.test.mjs && node tests/pdf-text-layer.test.mjs && node tests/katex-rendering.test.mjs",
     "test": "npm run test:core && npm run test:ui"
   },
   "dependencies": {
     "bootstrap": "5.3.3",
     "bootstrap-icons": "1.11.3",
+    "katex": "^0.18.1",
     "pdfjs-dist": "^6.1.200"
   },
   "devDependencies": {

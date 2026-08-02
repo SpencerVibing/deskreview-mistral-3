@@ -6,6 +6,7 @@
     <title>DeskReview</title>
     <link href="/vendor/bootstrap/css/bootstrap.min.css" rel="stylesheet">
     <link href="/vendor/bootstrap-icons/bootstrap-icons.min.css" rel="stylesheet">
+    <link href="/vendor/katex/katex.min.css" rel="stylesheet">
     <link href="/styles.css?v=20260728-23" rel="stylesheet">
   </head>
   <body>
@@ -527,7 +528,17 @@
             <div class="tab-content h-100">
               <section class="tab-pane fade h-100 overflow-auto" id="annotationContractPane" role="tabpanel" aria-labelledby="annotationContractTab" tabindex="0">
                 <div class="container-fluid p-4">
-                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="annotation-contract"><div><span class="fw-semibold text-body">Purpose:</span> Define the structured manuscript data Mistral must return.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> The displayed JSON Schema and document-level instructions are sent with each bounded annotation request.</div></div>
+                  <div class="alert diagnostics-purpose-alert border small py-3 px-3 mb-4" data-diagnostics-purpose="annotation-contract"><div class="fw-semibold text-body">Purpose:</div><ol class="mb-2 mt-2 ps-3"><li>Semantic extraction: identify individual titles, authors, affiliations, keywords, and abstracts from visible manuscript context.</li><li>Structural relationships: map visible author-to-affiliation links.</li><li>Body classification: identify section headings and classify prose blocks as abstract, article, or excluded.</li><li>Display structure: return table and figure captions with their in-text mentions.</li><li>Grounding: return raw OCR page, block, and exact-quote anchors for every extracted item.</li></ol><div class="mt-2"><span class="fw-semibold text-body">What happens:</span> The displayed JSON Schema and document-level instructions are sent with each annotation request. Mistral annotations are limited to batches of up to 8 consecutive PDF pages, so longer manuscripts are processed in separate page ranges.</div></div>
+                  <section class="border-top pt-4 mb-5" aria-labelledby="annotationReturnedDataTitle">
+                    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+                      <div>
+                        <h3 id="annotationReturnedDataTitle" class="h6 mb-1">Semantic extraction groups</h3>
+                        <p class="small text-secondary mb-0">Readable source-grounded items returned by each Annotation contract request.</p>
+                      </div>
+                      <span class="badge text-bg-light border fw-normal">Model response</span>
+                    </div>
+                    <div id="annotationReturnedData"></div>
+                  </section>
                   <div class="row g-4">
                     <div class="col-12 col-xl-7">
                       <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
@@ -560,23 +571,17 @@
               </section>
               <section class="tab-pane fade show active h-100 overflow-auto" id="annotationSourcePane" role="tabpanel" aria-labelledby="annotationSourceTab" tabindex="0">
                 <div class="container-lg p-4">
-                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="source-scope"><div><span class="fw-semibold text-body">Purpose:</span> Confirm which manuscript source material DeskReview received.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> This view shows raw OCR pages and blocks, together with the regions selected for later extraction; it does not create relationships between items.</div></div>
+                  <div class="alert diagnostics-purpose-alert border small py-3 px-3 mb-4" data-diagnostics-purpose="source-scope"><div><span class="fw-semibold text-body">Purpose:</span> Confirm which raw OCR material DeskReview received.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> This view lists only the original OCR blocks and their OCR-provided types. It does not show annotation classifications, selected regions, or relationships between manuscript items.</div></div>
                   <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
-                    <h3 class="h6 mb-0">Annotation source scopes</h3>
+                    <h3 class="h6 mb-0">Raw OCR blocks</h3>
                     <span class="badge text-bg-light border fw-normal">Raw OCR</span>
                   </div>
-                  <div id="annotationSourceScopeList" class="accordion mb-3"></div>
-                  <div class="accordion mb-4" id="annotationCombinedReferenceAccordion">
-                    <div class="accordion-item">
-                      <h4 class="accordion-header"><button class="accordion-button collapsed small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#annotationCombinedReferenceTextWrap" aria-expanded="false" aria-controls="annotationCombinedReferenceTextWrap">View combined reference-block input</button></h4>
-                      <div id="annotationCombinedReferenceTextWrap" class="accordion-collapse collapse" data-bs-parent="#annotationCombinedReferenceAccordion"><div class="accordion-body p-0"><pre id="annotationCombinedReferenceText" class="developer-contract-code"></pre></div></div>
-                    </div>
-                  </div>
+                  <div id="annotationSourceScopeList" class="table-responsive border rounded-3 overflow-hidden mb-3"></div>
                 </div>
               </section>
               <section class="tab-pane fade h-100 overflow-auto" id="referenceInventoryPane" role="tabpanel" aria-labelledby="referenceInventoryTab" tabindex="0">
                 <div class="container-fluid p-4">
-                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="bibliography-inventory"><div><span class="fw-semibold text-body">Purpose:</span> Turn OCR bibliography blocks into individual reference-list entries.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> A focused annotation returns each complete reference once. DeskReview renders each result as its own stable HTML target; this step does not search the article body.</div></div>
+                  <div class="alert diagnostics-purpose-alert border small py-3 px-3 mb-4" data-diagnostics-purpose="bibliography-inventory"><div><span class="fw-semibold text-body">Purpose:</span> Turn OCR bibliography blocks into individual reference-list entries.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> A focused annotation returns each complete reference once. DeskReview renders each result as its own stable HTML target; this step does not search the article body.</div></div>
                   <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
                     <div>
                       <h3 class="h6 mb-1">Bibliography extraction audit</h3>
@@ -624,11 +629,11 @@
               </section>
               <section class="tab-pane fade h-100 overflow-auto" id="bodyCitationsPane" role="tabpanel" aria-labelledby="bodyCitationsTab" tabindex="0">
                 <div class="container-fluid p-4">
-                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="body-citations"><div><span class="fw-semibold text-body">Purpose:</span> Find in-text citations in the article body.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> Step 2 identifies article-text OCR blocks. This step checks those blocks for citation mentions and verifies each returned citation passage against the OCR block Mistral identified as its source.</div></div>
+                  <div class="alert diagnostics-purpose-alert border small py-3 px-3 mb-4" data-diagnostics-purpose="body-citations"><div><span class="fw-semibold text-body">Purpose:</span> Find in-text citations in the article body.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> Blocks classified as <code>article</code> in Step 2 are sent to a focused citation-extraction request through the Mistral OCR API (<code>POST /v1/ocr</code>, model <code>mistral-ocr-latest</code>). This is the first step that identifies individual in-text citation markers.</div></div>
                   <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
                     <div>
                       <h3 class="h6 mb-1">In-text citation audit</h3>
-                      <p class="small text-secondary mb-0">Citation mentions found in the article-text OCR blocks, with exact source verification.</p>
+                      <p class="small text-secondary mb-0">Individual in-text citation markers returned by the focused scan.</p>
                     </div>
                     <div id="citationGroundingAuditMetrics" class="d-flex flex-wrap gap-2"></div>
                   </div>
@@ -669,7 +674,7 @@
               </section>
               <section class="tab-pane fade h-100 overflow-auto" id="documentQnaPane" role="tabpanel" aria-labelledby="documentQnaTab" tabindex="0">
                 <div class="container-lg p-4">
-                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="document-qna"><div><span class="fw-semibold text-body">Purpose:</span> Connect already extracted manuscript items.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> Document QnA maps bibliography entries to body citations and tables or figures to their manuscript mentions; it does not extract or rewrite manuscript content.</div></div>
+                  <div class="alert diagnostics-purpose-alert border small py-3 px-3 mb-4" data-diagnostics-purpose="document-qna"><div><span class="fw-semibold text-body">Purpose:</span> Connect already extracted manuscript items.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> Document QnA maps bibliography entries to body citations and tables or figures to their manuscript mentions; it does not extract or rewrite manuscript content.</div></div>
                   <div class="mb-4">
                     <h3 class="h6 mb-1">Relational source linking</h3>
                     <p class="small text-secondary mb-0">Document QnA maps already extracted source handles. It maps bibliography entries to body citations and tables or figures to body-text mentions; it does not extract manuscript entities.</p>
@@ -679,7 +684,7 @@
               </section>
               <section class="tab-pane fade h-100 overflow-auto" id="runtimeSummaryPane" role="tabpanel" aria-labelledby="runtimeSummaryTab" tabindex="0">
                 <div class="container-fluid p-4">
-                  <div class="small text-secondary border-start border-2 ps-3 mb-4" data-diagnostics-purpose="runtime-summary"><div><span class="fw-semibold text-body">Purpose:</span> Explain when each review result became available.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> This read-only view shows stage timing, dependencies, failures, and background work for count tiles and source links.</div></div>
+                  <div class="alert diagnostics-purpose-alert border small py-3 px-3 mb-4" data-diagnostics-purpose="runtime-summary"><div><span class="fw-semibold text-body">Purpose:</span> Explain when each review result became available.</div><div class="mt-1"><span class="fw-semibold text-body">What happens:</span> This read-only view shows stage timing, dependencies, failures, and background work for count tiles and source links.</div></div>
                   <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
                     <div>
                       <h3 class="h6 mb-1">Review processing flow</h3>

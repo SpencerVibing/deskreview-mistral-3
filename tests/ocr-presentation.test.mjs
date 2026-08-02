@@ -13,6 +13,13 @@ const lineNumberedPage = {
 assert.equal(hasLineNumberGutter(lineNumberedPage.blocks), true);
 assert.equal(ocrMarkdownForPresentation(lineNumberedPage), 'Title:\n\nModeling\nEarthquakes');
 
+const groupedLineNumberGutterPage = {
+  markdown: '51\n52\n53\n54\n55\n\n# Title',
+  blocks: [{ top_left_x: 29, content: '51\n52\n53\n54\n55' }, { top_left_x: 90, content: '# Title' }]
+};
+assert.equal(hasLineNumberGutter(groupedLineNumberGutterPage.blocks), true);
+assert.equal(ocrMarkdownForPresentation(groupedLineNumberGutterPage), '# Title');
+
 const numberedSectionPage = {
   markdown: '1 Introduction\n\n1. Study design',
   blocks: [{ top_left_x: 80, content: '1 Introduction' }, { top_left_x: 80, content: '1. Study design' }]

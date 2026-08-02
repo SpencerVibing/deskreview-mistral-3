@@ -1,4 +1,5 @@
 import { getDocument, GlobalWorkerOptions, TextLayer } from '/vendor/pdfjs/build/pdf.mjs';
+import renderMathInElement from '/vendor/katex/contrib/auto-render.mjs';
 import { initHome, refreshHome } from '/home.js';
 import { loadReview, saveReview } from '/review-store.js';
 import { validateDeclaredSource } from '/core/source-anchor.js';
@@ -228,9 +229,7 @@ function renderRuntimeSummary() {
 }
 function renderAnnotationSourceScope() {
   const list = el('#annotationSourceScopeList');
-  const combined = el('#annotationCombinedReferenceText');
   list.replaceChildren();
-  combined.textContent = '';
   const pages = state.raw?.pages || [];
   const rawBlocks = pages.flatMap((page, pageIndex) => (page.blocks || []).map((block, blockIndex) => ({
     pageIndex,
@@ -239,10 +238,6 @@ function renderAnnotationSourceScope() {
     type: String(block?.type || 'text'),
     content: String(block?.content || '')
   })));
-  const rawBlockById = new Map(rawBlocks.map((block) => [block.id, block]));
-  const referenceBlocks = rawBlocks.filter((block) => (
-    String(block?.type || '').toLowerCase() === 'references'
-  ));
   if (!pages.length) {
     const empty = document.createElement('div');
     empty.className = 'alert alert-light border small mb-0';
@@ -250,169 +245,224 @@ function renderAnnotationSourceScope() {
     list.append(empty);
     return;
   }
-
-  const sourcePageIndex = (item = {}) => {
-    const pageId = /^ocr-page-(\d+)$/.exec(String(item?.source?.ocr_page_id || ''));
-    if (pageId) return Number(pageId[1]);
-    if (Number.isInteger(item?.source?.ocr_page_index)) return item.source.ocr_page_index;
-    if (Number.isInteger(item?.source?.page_number)) return Math.max(0, item.source.page_number - 1);
-    return Number.MAX_SAFE_INTEGER;
-  };
-  const sourceBlockId = (item = {}) => {
-    if (item?.source?.ocr_block_id) return String(item.source.ocr_block_id);
-    if (typeof item === 'string') return String(item).split(' :: ')[0];
-    return '';
-  };
-  const sourceLabel = (item = {}) => (
-    item.text
-    || item.heading
-    || item.label
-    || item.source?.exact_quote
-    || sourceBlockId(item)
-    || 'Returned source'
-  );
-  const scopeItem = (item, fallbackPage = Number.MAX_SAFE_INTEGER) => {
-    const blockId = sourceBlockId(item);
-    const block = rawBlockById.get(blockId);
-    const pageIndex = sourcePageIndex(item);
-    return {
-      pageIndex: Number.isFinite(pageIndex) && pageIndex !== Number.MAX_SAFE_INTEGER ? pageIndex : (block?.pageIndex ?? fallbackPage),
-      blockId,
-      label: sourceLabel(item),
-      content: block?.content || item?.source?.exact_quote || ''
-    };
-  };
-  const blockKeyItem = (key) => {
-    const blockId = sourceBlockId(key);
-    const block = rawBlockById.get(blockId);
-    return {
-      pageIndex: block?.pageIndex ?? Number.MAX_SAFE_INTEGER,
-      blockId,
-      label: blockId || String(key),
-      content: block?.content || String(key)
-    };
-  };
-  const front = state.annotations['front-matter'] || {};
-  const body = state.annotations.body || {};
-  const titleItems = front.title?.source ? [front.title] : (front.titles || []);
-  const abstractItems = front.abstract?.source ? [front.abstract] : [];
-  const articleItems = [
-    ...(body.sections || []).map((item) => scopeItem(item)),
-    ...(body.prose_blocks || []).map(blockKeyItem)
-  ];
-  const scopes = [
-    { key: 'title', label: 'Title', items: titleItems.map((item) => scopeItem(item)) },
-    { key: 'authors', label: 'Authors', items: (front.authors || []).map((item) => scopeItem(item)) },
-    { key: 'affiliations', label: 'Affiliations', items: (front.affiliations || []).map((item) => scopeItem(item)) },
-    { key: 'abstract', label: 'Abstract', items: abstractItems.map((item) => scopeItem(item)).concat((front.abstract?.prose_blocks || []).map(blockKeyItem)) },
-    { key: 'keywords', label: 'Keywords', items: (front.keywords || []).map((item) => scopeItem(item)) },
-    { key: 'article', label: 'Article body', items: articleItems },
-    { key: 'tables', label: 'Tables', items: (body.display_items || []).filter((item) => item.kind === 'table').map((item) => scopeItem(item)) },
-    { key: 'figures', label: 'Figures', items: (body.display_items || []).filter((item) => item.kind === 'figure').map((item) => scopeItem(item)) },
-    {
-      key: 'references',
-      label: 'References',
-      items: referenceBlocks.map((block) => ({
-        pageIndex: block.pageIndex,
-        blockId: block.id,
-        label: `${block.type} block`,
-        content: block.content
-      }))
-    }
-  ];
-
-  const returnedBlockIds = new Set((state.annotations.references?.references || []).map((entry) => entry.origin?.ocr_block_id || entry.source?.ocr_block_id).filter(Boolean));
-
-  scopes.forEach((scope, scopeIndex) => {
-    const item = document.createElement('div');
-    item.className = 'accordion-item';
-    item.dataset.sourceScope = scope.key;
-    const heading = document.createElement('h4');
-    heading.className = 'accordion-header';
-    const button = document.createElement('button');
-    const collapseId = `annotationSourceScope${scopeIndex}`;
-    button.type = 'button';
-    button.className = 'accordion-button collapsed py-2';
-    button.dataset.bsToggle = 'collapse';
-    button.dataset.bsTarget = `#${collapseId}`;
-    button.setAttribute('aria-expanded', 'false');
-    button.setAttribute('aria-controls', collapseId);
-    const label = document.createElement('span');
-    label.className = 'd-flex flex-wrap align-items-center gap-2 w-100';
-    const name = document.createElement('span');
-    name.className = 'small fw-semibold';
-    name.textContent = scope.label;
-    const page = document.createElement('span');
-    page.className = 'small text-secondary';
-    const scopePages = [...new Set(scope.items.map((entry) => entry.pageIndex).filter(Number.isFinite))];
-    page.textContent = scopePages.length === 0
-      ? 'Not returned'
-      : scopePages.length === 1
-      ? `Page ${scopePages[0] + 1}`
-      : `Pages ${scopePages.map((pageIndex) => pageIndex + 1).join(', ')}`;
-    const count = document.createElement('span');
-    count.className = 'badge text-bg-light border fw-normal ms-auto me-2';
-    count.dataset.sourceScopeCount = '';
-    count.textContent = scope.key === 'references'
-      ? `${scope.items.length} OCR block${scope.items.length === 1 ? '' : 's'}`
-      : `${scope.items.length} item${scope.items.length === 1 ? '' : 's'}`;
-    label.append(name, page, count);
-    button.append(label);
-    heading.append(button);
-    const collapse = document.createElement('div');
-    collapse.id = collapseId;
-    collapse.className = 'accordion-collapse collapse';
-    const body = document.createElement('div');
-    body.className = 'accordion-body p-0';
-    const sources = document.createElement('div');
-    sources.className = 'list-group list-group-flush';
-    if (!scope.items.length) {
-      const unavailable = document.createElement('div');
-      unavailable.className = 'list-group-item px-3 py-3 small text-secondary';
-      unavailable.textContent = 'No source anchors were returned for this scope.';
-      sources.append(unavailable);
-    }
-    scope.items.forEach((entry) => {
-      const sourceRow = document.createElement('div');
-      sourceRow.className = 'list-group-item px-3 py-2';
-      const meta = document.createElement('div');
-      meta.className = 'd-flex flex-wrap align-items-center gap-2 mb-1';
-      const sourcePage = document.createElement('span');
-      sourcePage.className = 'small fw-semibold';
-      sourcePage.textContent = Number.isFinite(entry.pageIndex) ? `OCR page ${entry.pageIndex + 1}` : 'Page unavailable';
-      meta.append(sourcePage);
-      if (entry.blockId) {
-        const id = document.createElement('code');
-        id.className = 'small text-secondary';
-        id.textContent = entry.blockId;
-        meta.append(id);
-      }
-      if (scope.key === 'references') {
-        const status = document.createElement('span');
-        status.className = `badge fw-normal ms-auto ${returnedBlockIds.has(entry.blockId) ? 'text-bg-success' : 'text-bg-light border'}`;
-        status.textContent = returnedBlockIds.has(entry.blockId) ? 'Returned by annotation' : 'Selected by OCR';
-        meta.append(status);
-      }
-      const text = document.createElement('div');
-      text.className = 'small text-body text-break';
-      text.textContent = entry.label;
-      sourceRow.append(meta, text);
-      if (scope.key === 'references' && entry.content) {
-        const raw = document.createElement('pre');
-        raw.className = 'developer-contract-code border rounded-2 mt-2 mb-0';
-        raw.textContent = entry.content;
-        sourceRow.append(raw);
-      }
-      sources.append(sourceRow);
-    });
-    body.append(sources);
-    collapse.append(body);
-    item.append(heading, collapse);
-    list.append(item);
+  const table = document.createElement('table');
+  table.className = 'table table-sm align-top mb-0';
+  table.innerHTML = '<colgroup><col style="width: 72%"><col style="width: 28%"></colgroup><thead class="table-light"><tr><th scope="col" class="small fw-medium text-secondary">Raw OCR block</th><th scope="col" class="small fw-medium text-secondary">OCR details</th></tr></thead>';
+  const tbody = document.createElement('tbody');
+  rawBlocks.forEach((block) => {
+    const row = document.createElement('tr');
+    row.dataset.rawOcrBlock = block.id;
+    const source = document.createElement('td');
+    source.className = 'p-2';
+    const raw = document.createElement('pre');
+    raw.className = 'developer-contract-code border rounded-2 mb-0';
+    raw.textContent = block.content || 'Empty OCR block';
+    source.append(raw);
+    const details = document.createElement('td');
+    details.className = 'p-3';
+    const page = document.createElement('div');
+    page.className = 'small fw-semibold';
+    page.textContent = `OCR page ${block.pageIndex + 1}`;
+    const id = document.createElement('code');
+    id.className = 'd-block small text-secondary mt-1 text-break';
+    id.textContent = block.id;
+    const type = document.createElement('span');
+    type.className = 'badge text-bg-light border fw-normal mt-2';
+    type.textContent = block.type.trim().toLowerCase() || 'text';
+    details.append(page, id, type);
+    row.append(source, details);
+    tbody.append(row);
   });
-  combined.textContent = referenceBlocks.length
-    ? referenceBlocks.map((block) => `[${block.id} · OCR page ${block.pageIndex + 1}]\n${block.content}`).join('\n\n')
-    : 'No raw OCR references blocks were selected.';
+  table.append(tbody);
+  list.append(table);
+}
+function renderAnnotationReturnedData() {
+  const container = el('#annotationReturnedData');
+  if (!container) return;
+  container.replaceChildren();
+  const chunks = Array.isArray(state.annotationChunks) ? state.annotationChunks : [];
+  if (!chunks.length) {
+    const empty = document.createElement('div');
+    empty.className = 'alert alert-light border small mb-0';
+    empty.textContent = 'No Annotation contract response was retained for this review.';
+    container.append(empty);
+    return;
+  }
+  const sourceFromBlockKey = (value = '') => {
+    const match = /^(ocr-block-(\d+)-(\d+))\s*::\s*([\s\S]*)$/.exec(String(value));
+    return match ? { blockId: match[1], pageIndex: Number(match[2]), text: match[4] } : null;
+  };
+  const itemText = (item, fallback = '') => {
+    if (typeof item === 'string') return sourceFromBlockKey(item)?.text || item;
+    if (!item || typeof item !== 'object') return String(item ?? fallback);
+    const visible = [item.label, item.item_exact_quote, item.heading, item.text, item.citation_text, item.exact_quote, item.source?.exact_quote]
+      .find((value) => String(value || '').trim());
+    if (visible) return String(visible);
+    if (item.author_id || item.affiliation_id) return [item.author_id, item.affiliation_id].filter(Boolean).join(' → ');
+    return sourceFromBlockKey(fallback)?.text || fallback || 'No display text returned';
+  };
+  const sourceFor = (item, fallback = '') => {
+    const source = item && typeof item === 'object' ? item.source || {} : {};
+    const fromKey = sourceFromBlockKey(fallback);
+    const pageId = source.ocr_page_id || (Number.isInteger(fromKey?.pageIndex) ? `ocr-page-${fromKey.pageIndex}` : '');
+    const blockId = source.ocr_block_id || fromKey?.blockId || '';
+    const pageMatch = /^ocr-page-(\d+)$/.exec(String(pageId));
+    return { page: pageMatch ? Number(pageMatch[1]) + 1 : null, blockId };
+  };
+  const tabsId = 'annotationReturnedDataTabs';
+  const tabList = document.createElement('ul');
+  tabList.className = 'nav nav-tabs mb-3';
+  tabList.id = tabsId;
+  tabList.role = 'tablist';
+  const tabContent = document.createElement('div');
+  tabContent.className = 'tab-content';
+  chunks.forEach((chunk, chunkIndex) => {
+    const pages = Array.isArray(chunk.pages) && chunk.pages.length
+      ? `Pages ${chunk.pages[0] + 1}-${chunk.pages.at(-1) + 1}`
+      : 'Page range not retained';
+    const rangeId = String(chunk.range_id || `annotation-range-${chunkIndex}`)
+      .replace(/[^a-zA-Z0-9_-]/g, '-');
+    const tabId = `annotation-returned-tab-${rangeId}`;
+    const paneId = `annotation-returned-pane-${rangeId}`;
+    const tabItem = document.createElement('li');
+    tabItem.className = 'nav-item';
+    tabItem.role = 'presentation';
+    const tab = document.createElement('button');
+    tab.className = `nav-link${chunkIndex === 0 ? ' active' : ''}`;
+    tab.type = 'button';
+    tab.id = tabId;
+    tab.dataset.bsToggle = 'tab';
+    tab.dataset.bsTarget = `#${paneId}`;
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-controls', paneId);
+    tab.setAttribute('aria-selected', String(chunkIndex === 0));
+    tab.textContent = pages;
+    tabItem.append(tab);
+    tabList.append(tabItem);
+
+    const pane = document.createElement('div');
+    pane.className = `tab-pane fade${chunkIndex === 0 ? ' show active' : ''}`;
+    pane.id = paneId;
+    pane.setAttribute('role', 'tabpanel');
+    pane.setAttribute('aria-labelledby', tabId);
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'table-responsive border rounded-3 overflow-hidden';
+    const table = document.createElement('table');
+    table.className = 'table table-sm align-top mb-0';
+    table.innerHTML = '<colgroup><col style="width: 58%"><col style="width: 22%"><col style="width: 20%"></colgroup><thead class="table-light"><tr><th scope="col" class="small fw-medium text-secondary">Semantic extraction</th><th scope="col" class="small fw-medium text-secondary">Item details</th><th scope="col" class="small fw-medium text-secondary">OCR source</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    const groups = Object.entries(chunk.annotation || {});
+    if (!groups.length) groups.push(['No structured group returned', {}]);
+    groups.forEach(([groupName, groupValue]) => {
+      const groupRow = document.createElement('tr');
+      groupRow.className = 'table-light';
+      const groupCell = document.createElement('th');
+      groupCell.colSpan = 3;
+      groupCell.scope = 'colgroup';
+      groupCell.className = 'p-0';
+      const groupToggle = document.createElement('button');
+      groupToggle.type = 'button';
+      groupToggle.className = 'btn btn-sm w-100 d-flex align-items-center justify-content-between text-start px-3 py-2 rounded-0';
+      groupToggle.setAttribute('aria-expanded', 'true');
+      const groupLabel = document.createElement('span');
+      groupLabel.className = 'small fw-semibold';
+      groupLabel.textContent = `${groupName} · ${pages}`;
+      const groupIcon = document.createElement('i');
+      groupIcon.className = 'bi bi-chevron-down small text-secondary';
+      groupIcon.setAttribute('aria-hidden', 'true');
+      groupToggle.append(groupLabel, groupIcon);
+      groupCell.append(groupToggle);
+      groupRow.append(groupCell);
+      tbody.append(groupRow);
+      const groupRows = [];
+
+      const fields = groupValue && typeof groupValue === 'object' && !Array.isArray(groupValue)
+        ? Object.entries(groupValue)
+        : [['value', groupValue]];
+      fields.forEach(([fieldName, fieldValue]) => {
+        const items = fieldName === 'prose_block_types' && fieldValue && typeof fieldValue === 'object'
+          ? Object.entries(fieldValue).map(([blockKey, classification]) => ({ item: { classification }, fallback: blockKey }))
+          : Array.isArray(fieldValue)
+            ? fieldValue.map((item) => ({ item, fallback: '' }))
+            : [{ item: fieldValue, fallback: '' }];
+        if (!items.length) {
+          items.push({ item: null, fallback: 'No items returned' });
+        }
+        items.forEach(({ item, fallback }) => {
+          const row = document.createElement('tr');
+          row.dataset.annotationReturnedRange = String(chunk.range_id || `annotation-range-${chunkIndex}`);
+          row.dataset.annotationReturnedGroup = groupName;
+          row.dataset.annotationReturnedField = fieldName;
+          const value = document.createElement('td');
+          value.className = 'p-3';
+          const field = document.createElement('code');
+          field.className = 'small text-secondary d-block mb-1';
+          field.textContent = fieldName;
+          const text = document.createElement('div');
+          text.className = 'small text-body text-break';
+          text.textContent = itemText(item, fallback);
+          value.append(field, text);
+          const details = document.createElement('td');
+          details.className = 'p-3';
+          const id = item && typeof item === 'object' && item.id ? String(item.id) : '';
+          if (id) {
+            const idLabel = document.createElement('code');
+            idLabel.className = 'd-block small text-secondary text-break';
+            idLabel.textContent = id;
+            details.append(idLabel);
+          }
+          const classification = item && typeof item === 'object' ? item.classification : '';
+          if (classification) {
+            const badge = document.createElement('span');
+            badge.className = 'badge text-bg-light border fw-normal';
+            badge.textContent = classification;
+            details.append(badge);
+          }
+          if (!id && !classification) {
+            const range = document.createElement('code');
+            range.className = 'small text-secondary text-break';
+            range.textContent = String(chunk.range_id || `annotation-range-${chunkIndex}`);
+            details.append(range);
+          }
+          const source = document.createElement('td');
+          source.className = 'p-3';
+          const location = sourceFor(item, fallback);
+          if (location.page) {
+            const page = document.createElement('div');
+            page.className = 'small fw-semibold';
+            page.textContent = `OCR page ${location.page}`;
+            source.append(page);
+          }
+          if (location.blockId) {
+            const block = document.createElement('code');
+            block.className = 'd-block small text-secondary mt-1 text-break';
+            block.textContent = location.blockId;
+            source.append(block);
+          }
+          if (!location.page && !location.blockId) {
+            const unavailable = document.createElement('span');
+            unavailable.className = 'small text-secondary';
+            unavailable.textContent = 'No OCR source returned';
+            source.append(unavailable);
+          }
+          row.append(value, details, source);
+          tbody.append(row);
+          groupRows.push(row);
+        });
+      });
+      groupToggle.addEventListener('click', () => {
+        const expanded = groupToggle.getAttribute('aria-expanded') !== 'true';
+        groupToggle.setAttribute('aria-expanded', String(expanded));
+        groupIcon.className = `bi bi-chevron-${expanded ? 'down' : 'right'} small text-secondary`;
+        groupRows.forEach((row) => { row.hidden = !expanded; });
+      });
+    });
+    table.append(tbody);
+    tableWrap.append(table);
+    pane.append(tableWrap);
+    tabContent.append(pane);
+  });
+  container.append(tabList, tabContent);
 }
 function renderReferenceInventoryDiagnostics() {
   const blocks = referenceBlocksFromRawPages(state.raw?.pages || []);
@@ -617,7 +667,7 @@ function renderCitationGroundingAudit() {
   }), { returned: 0, accepted: 0, rejected: 0 });
   [
     ['Citation mentions found', totals.returned],
-    ['Source verified', totals.accepted],
+    ['OCR source anchor verified', totals.accepted],
     ['Could not verify', totals.rejected]
   ].forEach(([label, value]) => {
     const metric = document.createElement('div');
@@ -638,13 +688,6 @@ function renderCitationGroundingAudit() {
     container.append(empty);
     return;
   }
-  const interpretation = document.createElement('div');
-  interpretation.className = 'alert alert-light border small mb-4';
-  const interpretationBase = 'Citation mentions found is the number of individual in-text citation occurrences Mistral identified across all article-text OCR blocks selected in Step 2; it is not the number of blocks. Source verified means DeskReview confirmed that the exact citation marker exists character-for-character in the OCR text block Mistral identified as its source. The complete OCR block is retained as context. Could not verify means the returned marker and that OCR block did not match exactly.';
-  interpretation.textContent = state.citationExtraction?.status === 'unavailable'
-    ? `${interpretationBase} At least one request failed source verification or was unavailable, so Document QnA did not start and source-verified rows remain diagnostic evidence only.`
-    : `${interpretationBase} Document QnA can then map each source-verified occurrence to one or more bibliography entries.`;
-  container.append(interpretation);
   const reasonLabels = {
     label_not_in_context: 'The returned citation passage does not contain the complete citation marker Mistral reported',
     context_not_unique_in_raw_ocr: 'The citation passage occurs in more than one OCR text block in this older stored review, so its source is ambiguous',
@@ -990,6 +1033,19 @@ function setSourceLinkStatus(kinds, status) {
         : 'unavailable';
 }
 function announceHtmlReady() { htmlMode.classList.remove('is-html-ready'); void htmlMode.offsetWidth; htmlMode.classList.add('is-html-ready'); }
+function renderOcrMath(root = htmlDocument) {
+  if (!root) return;
+  renderMathInElement(root, {
+    delimiters: [
+      { left: '$$', right: '$$', display: true },
+      { left: '\\[', right: '\\]', display: true },
+      { left: '\\(', right: '\\)', display: false }
+    ],
+    throwOnError: false,
+    strict: 'ignore',
+    errorCallback: () => {}
+  });
+}
 function appendMarkdown(content, value = '') { renderMarkdown(value).split(/\n{2,}/).filter(Boolean).forEach((block) => { const heading = /^(#{1,6})\s+([\s\S]+)$/.exec(block.trim()); const node = document.createElement(heading ? `h${Math.min(6, heading[1].length + 1)}` : 'p'); node.className = heading ? 'ocr-markdown-heading' : 'ocr-markdown-paragraph'; node.innerHTML = inlineMarkdown(heading ? heading[2] : block); content.append(node); }); }
 function safeTable(tableHtml = '') { const allowed = new Set(['TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD', 'B', 'STRONG', 'I', 'EM', 'SUB', 'SUP', 'BR']); const source = new DOMParser().parseFromString(tableHtml, 'text/html').querySelector('table'); if (!source) return null; const copy = (node) => { if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.nodeValue); if (!allowed.has(node.nodeName)) return document.createDocumentFragment(); const clone = document.createElement(node.nodeName.toLowerCase()); if (['TD', 'TH'].includes(node.nodeName)) ['colspan', 'rowspan'].forEach((name) => { const value = Number(node.getAttribute(name)); if (Number.isInteger(value) && value > 0) clone.setAttribute(name, String(value)); }); node.childNodes.forEach((child) => clone.append(copy(child))); return clone; }; return copy(source); }
 function appendTableObject(content, table) {
@@ -1100,6 +1156,7 @@ function showHtml(pages = []) {
     htmlDocument.append(section);
   });
   if (pages.length) {
+    renderOcrMath();
     announceHtmlReady();
     requestAnimationFrame(() => {
       const host = el('.html-scroll');
@@ -2218,6 +2275,7 @@ document.querySelectorAll('[data-open-guideline]').forEach((button) => button.ad
 el('#annotationContractModal').addEventListener('show.bs.modal', () => {
   renderDeveloperDiagnosticsContext();
   renderAnnotationSourceScope();
+  renderAnnotationReturnedData();
   renderFocusedCitationContract();
   renderReferenceInventoryDiagnostics();
   renderCitationGroundingAudit();

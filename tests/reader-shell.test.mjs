@@ -149,15 +149,15 @@ await page.locator('#annotationContractButton').waitFor({ state: 'visible' });
 await page.locator('#annotationContractButton').click();
 await page.locator('#annotationContractModal.show').waitFor({ state: 'visible' });
 assert.equal(await page.locator('[data-diagnostics-purpose]').count(), 6);
-assert.equal(await page.locator('[data-diagnostics-purpose]').evaluateAll((items) => items.every((item) => item.children.length === 2 && [...item.children].every((child) => getComputedStyle(child).display === 'block'))), true);
-assert.match(await page.locator('[data-diagnostics-purpose="source-scope"]').textContent(), /raw OCR pages and blocks/i);
+assert.equal(await page.locator('[data-diagnostics-purpose]').evaluateAll((items) => items.every((item) => item.children.length >= 2 && [...item.children].every((child) => getComputedStyle(child).display === 'block'))), true);
+assert.match(await page.locator('[data-diagnostics-purpose="source-scope"]').textContent(), /original OCR blocks/i);
 assert.match(await page.locator('[data-diagnostics-purpose="annotation-contract"]').textContent(), /JSON Schema and document-level instructions/i);
 assert.match(await page.locator('[data-diagnostics-purpose="bibliography-inventory"]').textContent(), /individual reference-list entries/i);
 assert.match(await page.locator('[data-diagnostics-purpose="bibliography-inventory"]').textContent(), /stable HTML target/i);
 assert.match(await page.locator('[data-diagnostics-purpose="body-citations"]').textContent(), /in-text citations in the article body/i);
 assert.match(await page.locator('[data-diagnostics-purpose="document-qna"]').textContent(), /maps bibliography entries to body citations/i);
 assert.match(await page.locator('[data-diagnostics-purpose="runtime-summary"]').textContent(), /stage timing, dependencies, failures/i);
-assert.match(await page.locator('#annotationFormatCode').textContent(), /deskreview_document_annotation_v16/);
+assert.match(await page.locator('#annotationFormatCode').textContent(), /deskreview_document_annotation_v17/);
 assert.doesNotMatch(await page.locator('#annotationFormatCode').textContent(), /reference_audit/);
 assert.match(await page.locator('#annotationPromptText').textContent(), /Return only visible information/);
 assert.equal(await page.locator('#annotationFormatOverview > .annotation-schema-group').count(), 3);
@@ -177,15 +177,11 @@ assert.match(await authorLabelSchemaButton.locator('xpath=../..').textContent(),
 assert.equal(await page.locator('#annotationPromptInstructions > li').count(), 3);
 await page.locator('#annotationSourceTab').click();
 assert.equal(await page.locator('#annotationSourceScopeSummary').count(), 0);
-assert.equal(await page.locator('#annotationSourceScopeList > .accordion-item').count(), 9);
-assert.deepEqual(
-  await page.locator('#annotationSourceScopeList > .accordion-item').evaluateAll((items) => items.map((item) => item.dataset.sourceScope)),
-  ['title', 'authors', 'affiliations', 'abstract', 'keywords', 'article', 'tables', 'figures', 'references']
-);
-assert.equal(await page.locator('[data-source-scope="references"] .list-group-item').count(), 22);
-assert.match(await page.locator('[data-source-scope="references"] [data-source-scope-count]').textContent(), /OCR blocks/);
-assert.doesNotMatch(await page.locator('[data-source-scope="references"] [data-source-scope-count]').textContent(), /sources/);
-assert.match(await page.locator('#annotationCombinedReferenceText').textContent(), /ocr-block-/);
+assert.equal(await page.locator('#annotationSourceScopeList table').count(), 1);
+assert.ok(await page.locator('[data-raw-ocr-block]').count() > 0);
+assert.match(await page.locator('[data-raw-ocr-block]').first().textContent(), /OCR page 1/);
+assert.ok(await page.locator('[data-raw-ocr-block] pre.developer-contract-code').count() > 0);
+assert.doesNotMatch(await page.locator('#annotationSourceScopeList').textContent(), /Returned by annotation|Selected by OCR/);
 await page.locator('#referenceInventoryTab').click();
 assert.match(await page.locator('#referenceAnnotationFormatCode').textContent(), /deskreview_reference_annotation_v7/);
 assert.equal(await page.locator('#referenceAnnotationFormatOverview > .annotation-schema-group').count(), 1);
@@ -534,12 +530,11 @@ await citationValidationPage.locator('#annotationContractButton').click();
 await citationValidationPage.locator('#annotationContractModal.show').waitFor({ state: 'visible' });
 await citationValidationPage.locator('#bodyCitationsTab').click();
 assert.match(await citationValidationPage.locator('#citationGroundingAuditMetrics').textContent(), /2\s*Citation mentions found/);
-assert.match(await citationValidationPage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*Source verified/);
+assert.match(await citationValidationPage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*OCR source anchor verified/);
 assert.match(await citationValidationPage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*Could not verify/);
 assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /Source verification failed/);
-assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /Citation mentions found is the number of individual in-text citation occurrences/i);
-assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /complete OCR block is retained as context/i);
-assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /Document QnA can then map each source-verified occurrence/i);
+assert.match(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /Article-text blocks/);
+assert.doesNotMatch(await citationValidationPage.locator('#citationGroundingAudit').textContent(), /Citation mentions found is the number of individual in-text citation occurrences/i);
 await citationValidationPage.locator('#documentQnaTab').click();
 assert.match(await citationValidationPage.locator('#documentQnaOverview').textContent(), /Reference relations/i);
 await citationValidationPage.close();
@@ -594,7 +589,7 @@ assert.match(await referenceFailurePage.locator('#citationAnnotationFormatOvervi
 assert.match(await referenceFailurePage.locator('#citationAnnotationFormatOverview [data-schema-path="citation_blocks[].citation_mentions[].citation_text"]').locator('xpath=../..').textContent(), /copied character-for-character.*raw OCR block/i);
 assert.match(await referenceFailurePage.locator('#citationAnnotationPromptText').textContent(), /AUTHORITATIVE RAW OCR ARTICLE BLOCKS/);
 assert.match(await referenceFailurePage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*Citation mentions found/);
-assert.match(await referenceFailurePage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*Source verified/);
+assert.match(await referenceFailurePage.locator('#citationGroundingAuditMetrics').textContent(), /1\s*OCR source anchor verified/);
 assert.equal(await referenceFailurePage.locator('#citationGroundingAudit table').count(), 1);
 assert.match(await referenceFailurePage.locator('#citationGroundingAudit thead').textContent(), /Article-text blocks/);
 assert.match(await referenceFailurePage.locator('#citationGroundingAudit tbody > tr').first().textContent(), /1 checked/);
@@ -701,6 +696,7 @@ for (const [id, file, authors, references] of [['chemrxiv', 'chemRxiv.pdf', '5',
   }
   if (id === 'eartharxiv') {
     assert.equal(await storedPreprintPage.locator('.ocr-markdown-paragraph').evaluateAll((nodes) => nodes.some((node) => /^\s*51\s*(?:\n|$)\s*52\s*(?:\n|$)/.test(node.textContent || ''))), false, 'EarthArXiv standalone line-number runs are not rendered as headings');
+    assert.equal(await storedPreprintPage.locator('.ocr-html').textContent().then((text) => !/\b51\s+52\s+53\s+54\s+55\b/.test(text || '')), true, 'EarthArXiv grouped line-number gutters are not rendered as text');
   }
   if (id === 'researchsquare') {
     assert.equal(await storedPreprintPage.locator('.ocr-page[data-page="12"]').textContent().then((text) => !/img-\d+\.jpeg/i.test(text || '')), true, 'ResearchSquare OCR image placeholders are not rendered as manuscript text');

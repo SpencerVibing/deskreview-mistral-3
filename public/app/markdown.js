@@ -6,20 +6,14 @@ function escapeHtml(value = '') {
   return String(value).replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
 }
 
-function renderMath(value = '') {
-  return String(value).replace(/\\(?:sigma)/g, 'σ').replace(/\\(?:psi)/g, 'ψ').replace(/\\(?:phi)/g, 'φ').replace(/\\(?:approx)/g, '≈').replace(/\\(?:sim)/g, '∼').replace(/\\(?:leq)/g, '≤').replace(/\\(?:geq)/g, '≥').replace(/\\(?:times)/g, '×').replace(/\\(?:cdot)/g, '·').replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '<span class="ocr-fraction"><sup>$1</sup><span>/</span><sub>$2</sub></span>').replace(/([A-Za-z0-9)})])\^\{([^{}]+)\}/g, '$1<sup>$2</sup>').replace(/([A-Za-z0-9)})])_\{([^{}]+)\}/g, '$1<sub>$2</sub>');
-}
-
 export function inlineMarkdown(value = '') {
   const maths = [];
-  let output = escapeHtml(value).replace(/\$\$([\s\S]+?)\$\$/g, (_, math) => `@@DRMATH${maths.push(math) - 1}@@`);
-  // OCR emits some PDF superscripts as inline TeX, for example `\( ^{1} \)`.
-  // This is presentation markup only: the original OCR text remains unchanged.
-  output = output.replace(/\\\(\s*\^\{([^{}]+)\}\s*\\\)/g, '<sup>$1</sup>');
-  output = output.replace(/\\\(\s*_\{([^{}]+)\}\s*\\\)/g, '<sub>$1</sub>');
+  // Preserve OCR TeX verbatim while applying Markdown formatting around it. KaTeX
+  // renders these text nodes after the complete OCR page has been mounted.
+  let output = escapeHtml(value).replace(/\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\\([\s\S]+?\\\)/g, (math) => `@@DRTEX${maths.push(math) - 1}@@`);
   output = output.replace(/!\[[^\]]*\]\([^\n)]*\)/g, '').replace(/\[([^\]]+)\]\([^\n)]*\.html\)/gi, '$1');
   output = output.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>').replace(/__([\s\S]+?)__/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>').replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>');
-  return output.replace(/@@DRMATH(\d+)@@/g, (_, index) => `<span class="ocr-math">${renderMath(maths[Number(index)])}</span>`);
+  return output.replace(/@@DRTEX(\d+)@@/g, (_, index) => maths[Number(index)]);
 }
 
 export function markdownLabel(value = '') {

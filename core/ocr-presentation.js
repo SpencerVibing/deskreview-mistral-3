@@ -21,8 +21,12 @@ export function hasLineNumberGutter(blocks = []) {
   const leftEdge = Math.min(...positioned.map((block) => Number(block.top_left_x)));
   const gutterNumbers = positioned.flatMap((block) => {
     if (Number(block.top_left_x) > leftEdge + 24) return [];
-    const match = /^\s*(\d{1,4})\s*$/.exec(String(block.content || ''));
-    return match ? [Number(match[1])] : [];
+    const lines = String(block.content || '').trim().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    // OCR may keep the whole printed gutter in one left-edge block (for example
+    // `51` through `91`). Only an all-numeric block can contribute here, so
+    // section headings and manuscript prose remain untouched.
+    if (!lines.length || !lines.every((line) => /^\d{1,4}$/.test(line))) return [];
+    return lines.map(Number);
   });
   return consecutiveRunLength(gutterNumbers) >= 5;
 }
@@ -36,5 +40,6 @@ export function ocrMarkdownForPresentation(page = {}) {
       if (/^\s*\d{1,4}\s*$/.test(line)) return '';
       return line.replace(/^\s*\d{1,4}\s+(?=\S)/, '');
     })
-    .join('\n');
+    .join('\n')
+    .trim();
 }

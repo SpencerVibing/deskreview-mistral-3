@@ -14,6 +14,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; cha
 const roots = [
   { prefix: '/vendor/bootstrap/', path: join(ROOT, 'node_modules/bootstrap/dist') },
   { prefix: '/vendor/bootstrap-icons/', path: join(ROOT, 'node_modules/bootstrap-icons/font') },
+  { prefix: '/vendor/katex/', path: join(ROOT, 'node_modules/katex/dist') },
   { prefix: '/vendor/pdfjs/', path: join(ROOT, 'node_modules/pdfjs-dist') },
   { prefix: '/core/', path: join(ROOT, 'core') },
   { prefix: '/', path: join(ROOT, 'public') }
@@ -23,6 +24,7 @@ const DEV_REVISION_FILES = [
   'public/styles.css',
   'public/home.js',
   'public/app.js',
+  'public/app/markdown.js',
   'public/assets/ambient-paper-v2.svg',
   'core/citation-annotation.js',
   'core/reference-links-contract.js',
